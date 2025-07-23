@@ -1,2 +1,5 @@
 # githubへアップロードしない
 .env
+
+# Python 仮想環境
+venv/
