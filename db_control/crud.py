@@ -193,28 +193,27 @@ def get_recommended_users_by_tag(tag: str) -> List[mymodels.User]:
             select(mymodels.User).where(mymodels.User.user_id.in_(subquery)).limit(5)
         ).scalars().all()
 
-def find_meeting_ids_by_tag_vector(
-    db: Session,
-    query_vector: List[float],
-    top_k: int = 5
-) -> List[int]:
-    """
-    pgvector の cosine_distance を使って、
-    Tag→Meeting を JOIN し、上位 top_k 件の meeting_id を返す
-    """
+def find_meeting_ids_by_tag_vector(db: Session, query_vector: List[float], top_k: int = 5) -> List[int]:
+    # 距離 (cosine_distance) の式を一度定義しておく
+    distance_expr = mymodels.Tag.vector_embedding.cosine_distance(query_vector)
+
+    # 1) タグごとに最小距離だけを残すサブクエリを作成
+    subq = (
+        select(
+            mymodels.Tag.meeting_id.label("meeting_id"),
+            func.min(distance_expr).label("distance")
+        )
+        .group_by(mymodels.Tag.meeting_id)
+        .subquery()
+    )
+
+    # 2) ミーティングID を距離でソートして取得
     stmt = (
-        select(mymodels.Meeting.meeting_id)
-        .join(
-            mymodels.Tag,
-            mymodels.Tag.meeting_id == mymodels.Meeting.meeting_id
-        )
-        .order_by(
-            mymodels.Tag.vector_embedding.cosine_distance(query_vector)
-        )
-        .distinct()        # 同じ meeting_id の重複を排除
+        select(subq.c.meeting_id)
+        .order_by(subq.c.distance)
         .limit(top_k)
     )
-    # scalars() を使うと、タプルではなく meeting_id のリストが得られる
+
     return db.execute(stmt).scalars().all()
 
 # === Participant関連 ===
