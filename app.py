@@ -12,6 +12,10 @@ from db_control.create_tables import init_db
 from dotenv import load_dotenv
 from typing import Optional, List
 
+from mymodels import User, Organization  # SQLAlchemy models
+from database import SessionLocal
+import crud
+
 # アプリケーション初期化時にテーブルを作成
 init_db()
 
@@ -267,28 +271,49 @@ async def generate_tags(topic: str = Query(..., description="抽出対象の文�
         raise HTTPException(status_code=500, detail=f"タグ生成に失敗しました: {str(e)}")
 
 @app.get("/recommend", response_model=List[RecommendUser])
-async def get_recommendations(tag: str = Query(...)):
+async def get_recommendations(tag: str = Query(..., description="基準となるキーワード")):
     """
     おすすめ参加者API
-    キーワードからおすすめ参加者を紹介する
+    タグ（キーワード）のベクトル検索から近しい会議を見つけ、
+    その会議の参加者を推薦する
     """
+    # 1) ChatGPT API でタグをベクトル化
     try:
-        recommended_users = crud.get_recommended_users_by_tag(tag)
-        
-        result = []
-        for user in recommended_users:
-            organization = crud.get_organization_by_id(user.organization_id)
-            recommend_user = RecommendUser(
-                organization_name=organization.organization_name if organization else "",
-                name=user.name,
-                user_id=user.user_id
+        embed_resp = openai.Embedding.create(
+            model="text-embedding-3-small",
+            input=[tag]
+        )
+        query_vector = embed_resp.data[0].embedding
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"タグ埋め込みの取得に失敗: {e}")
+
+    # 2) DB からベクトル検索で近傍タグを取得
+    try:
+        db = SessionLocal()
+        # crud 側で pgvector の <-> 演算子を使った検索を実装
+        similar_meeting_ids = crud.find_meeting_ids_by_tag_vector(db, query_vector, top_k=5)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"類似タグ検索に失敗: {e}")
+
+    # 3) 参加者取得
+    try:
+        users = crud.get_users_by_meeting_ids(db, similar_meeting_ids)
+        result: List[RecommendUser] = []
+        for user in users:
+            org = crud.get_organization_by_id(db, user.organization_id)
+            result.append(
+                RecommendUser(
+                    organization_name=org.organization_name if org else "",
+                    name=user.name,
+                    user_id=user.user_id
+                )
             )
-            result.append(recommend_user)
-        
         return result
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
+        raise HTTPException(status_code=500, detail=f"参加者取得に失敗: {e}")
+    finally:
+        db.close()
+        
 @app.post("/attend")
 async def create_attendance(attend: AttendCreate):
     """
