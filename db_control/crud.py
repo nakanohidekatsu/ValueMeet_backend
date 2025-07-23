@@ -69,17 +69,14 @@ def search_users_by_name(name: str) -> List[mymodels.User]:
 
 # === Organization関連 ===
 
-def get_organization_by_id(
-    db: Session,
-    organization_id: int
-) -> Optional[mymodels.Organization]:
-    """組織IDで組織情報を取得（渡された db セッションを利用）"""
+def get_organization_by_id(organization_id: int) -> Optional[mymodels.Organization]:
     if organization_id is None:
         return None
-    return db.execute(
-        select(mymodels.Organization)
-        .where(mymodels.Organization.organization_id == organization_id)
-    ).scalar_one_or_none()
+    with SessionLocal() as db:
+        return db.execute(
+            select(mymodels.Organization)
+            .where(mymodels.Organization.organization_id == organization_id)
+        ).scalar_one_or_none()
 
 # === Meeting関連 ===
 

@@ -315,7 +315,7 @@ async def get_recommendations(
         users = crud.get_users_by_meeting_ids(db, similar_meeting_ids)
         result: List[RecommendUser] = []
         for user in users:
-            org = crud.get_organization_by_id(db, user.organization_id)
+            org = crud.get_organization_by_id(user.organization_id)
             result.append(
                 RecommendUser(
                     organization_name=org.organization_name if org else "",
