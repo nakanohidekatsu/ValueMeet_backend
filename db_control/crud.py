@@ -193,7 +193,15 @@ def get_recommended_users_by_tag(tag: str) -> List[mymodels.User]:
             select(mymodels.User).where(mymodels.User.user_id.in_(subquery)).limit(5)
         ).scalars().all()
 
-def find_meeting_ids_by_tag_vector(db: Session, query_vector: List[float], top_k: int = 5):
+def find_meeting_ids_by_tag_vector(
+    db: Session,
+    query_vector: List[float],
+    top_k: int = 5
+) -> List[int]:
+    """
+    pgvector の cosine_distance を使って、
+    Tag→Meeting を JOIN し、上位 top_k 件の meeting_id を返す
+    """
     stmt = (
         select(mymodels.Meeting.meeting_id)
         .join(
@@ -203,9 +211,11 @@ def find_meeting_ids_by_tag_vector(db: Session, query_vector: List[float], top_k
         .order_by(
             mymodels.Tag.vector_embedding.cosine_distance(query_vector)
         )
+        .distinct()        # 同じ meeting_id の重複を排除
         .limit(top_k)
     )
-    return [row[0] for row in db.execute(stmt).all()]
+    # scalars() を使うと、タプルではなく meeting_id のリストが得られる
+    return db.execute(stmt).scalars().all()
 
 # === Participant関連 ===
 def create_participant(meeting_id: int, user_id: str, role_type: Optional[str]) -> int:
