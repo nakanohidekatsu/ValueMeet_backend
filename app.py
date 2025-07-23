@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field
 import os
 import json
-import openai
+from openai import OpenAI
 
 from db_control import crud, mymodels
 from db_control.create_tables import init_db
@@ -99,7 +99,8 @@ app.add_middleware(
 load_dotenv()
 
 # OpenAI APIキーの設定
-openai.api_key = os.getenv("OPENAI_API_KEY")
+# openai.api_key = os.getenv("OPENAI_API_KEY")
+client = OpenAI()
 
 # データベース初期化
 @app.on_event("startup")
