@@ -18,6 +18,7 @@ from db_control.connect import engine
 from sqlalchemy import func
 
 from .mymodels import Tag
+from .mymodels import User, Participant
 from pgvector.sqlalchemy import Vector
 
 # 環境変数の読み込み
@@ -241,6 +242,24 @@ def get_participant_role(meeting_id: int, user_id: str) -> Optional[mymodels.Par
                 )
             )
         ).scalar_one_or_none()
+
+
+def get_users_by_meeting_ids(
+    db: Session,
+    meeting_ids: list[int]
+) -> list[User]:
+    """
+    与えられた meeting_id リストに参加しているユーザーを取得。
+    同一ユーザーが重複して返らないよう DISTINCT にしています。
+    """
+    stmt = (
+        select(User)
+        .join(Participant, Participant.user_id == User.user_id)
+        .where(Participant.meeting_id.in_(meeting_ids))
+        .distinct()
+    )
+    return db.execute(stmt).scalars().all()
+
 
 # === データベース初期化用の関数 ===
 
