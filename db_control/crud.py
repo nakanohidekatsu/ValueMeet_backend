@@ -194,13 +194,15 @@ def get_recommended_users_by_tag(tag: str) -> List[mymodels.User]:
         ).scalars().all()
 
 def find_meeting_ids_by_tag_vector(db: Session, query_vector: List[float], top_k: int = 5):
-    """
-    tags_vector カラムは Vector 型で定義している想定
-        tags_vector = Column(Vector(embedding_dim), nullable=False)
-    """
     stmt = (
-        select(mymodels.Meeting.meeting_id)  # mymodels.Meeting として参照
-        .order_by(mymodels.Tag.vector_embedding.cosine_distance(query_vector))
+        select(mymodels.Meeting.meeting_id)
+        .join(
+            mymodels.Tag,
+            mymodels.Tag.meeting_id == mymodels.Meeting.meeting_id
+        )
+        .order_by(
+            mymodels.Tag.vector_embedding.cosine_distance(query_vector)
+        )
         .limit(top_k)
     )
     return [row[0] for row in db.execute(stmt).all()]
