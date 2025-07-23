@@ -289,7 +289,7 @@ async def get_recommendations(
     # （以降は前回ご案内の「ベクトル化→ベクトル検索→参加者取得」処理）
     # 1) ChatGPT API でタグをベクトル化
     try:
-        embed_resp = openai.Embedding.create(
+        embed_resp = client.embeddings.create(
             model="text-embedding-3-small",
             input=[tag]
         )
@@ -301,7 +301,7 @@ async def get_recommendations(
     try:
         db = SessionLocal()
         # crud 側で pgvector の <-> 演算子を使った検索を実装
-    #    similar_meeting_ids = crud.find_meeting_ids_by_tag_vector(db, query_vector, top_k=5)
+        similar_meeting_ids = crud.find_meeting_ids_by_tag_vector(db, query_vector, top_k=top_k)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"類似タグ検索に失敗: {e}")
 
