@@ -1,3 +1,5 @@
+# mymodels.py
+
 from sqlalchemy import (
     Integer, String, Text, DateTime, Date,
     ForeignKey
@@ -99,7 +101,8 @@ class Tag(Base):
 
     tag_id: Mapped[int] = mapped_column(
         Integer,
-        primary_key=True
+        primary_key=True,
+        autoincrement=True
     )
     meeting_id: Mapped[int] = mapped_column(
         Integer,
@@ -110,10 +113,10 @@ class Tag(Base):
         Text,
         nullable=False
     )
-    # vector_embedding: Mapped[list[float]] = mapped_column(
-    #     Vector(1536),
-    #     nullable=False
-    # )
+    vector_embedding: Mapped[list[float]] = mapped_column(
+        Vector(1536),
+        nullable=False
+    )
 
 class Participant(Base):
     __tablename__ = 'participants'

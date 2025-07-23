@@ -59,7 +59,6 @@ class AgendaCreate(BaseModel):
 class TagRegister(BaseModel):
     meeting_id: int
     tag: str
-    vector_embedding: List[float]
 
 class TagGenerateResponse(BaseModel):
     tags: List[str]

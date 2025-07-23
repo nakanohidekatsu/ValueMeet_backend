@@ -1,3 +1,4 @@
+# crud.py
 # uname() error回避
 import platform
 print("platform", platform.uname())
