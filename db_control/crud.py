@@ -21,8 +21,22 @@ from sqlalchemy import func
 load_dotenv()
 
 # データベース接続設定　#
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://user:password@localhost/meeting_db")
-engine = create_engine(DATABASE_URL)
+# DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://user:password@localhost/postgres")
+# engine = create_engine(DATABASE_URL)
+
+# データベース接続情報
+DB_USER = os.getenv('MYSQL_USER')
+DB_PASSWORD = os.getenv('MYSQL_PASSWORD')
+DB_HOST = os.getenv('MYSQL_SERVER')
+DB_PORT = os.getenv('MYSQL_DB_PORT')
+DB_NAME = os.getenv('MYSQL_DB')
+
+ssl_cert = str('DigiCertGlobalRootCA.crt.pem')
+
+# MySQLのURL構築
+DATABASE_URL = f"postgresql+psycopg2://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+SSL_CERT_PATH = os.getenv("SSL_CERT_PATH")
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def get_db():
