@@ -271,12 +271,22 @@ async def generate_tags(topic: str = Query(..., description="抽出対象の文�
         raise HTTPException(status_code=500, detail=f"タグ生成に失敗しました: {str(e)}")
 
 @app.get("/recommend", response_model=List[RecommendUser])
-async def get_recommendations(tag: str = Query(..., description="基準となるキーワード")):
+async def get_recommendations(
+    tag: str = Query(..., description="基準となるキーワード"),
+    top_k: int = Query(
+        5,
+        title="結果件数",
+        description="類似会議として返す上位件数。大きいほど広く拾います",
+        ge=1,
+        le=100
+    )
+):
     """
     おすすめ参加者API
-    タグ（キーワード）のベクトル検索から近しい会議を見つけ、
-    その会議の参加者を推薦する
+    tag: キーワード
+    top_k: 上位何件の類似会議IDを参照するか
     """
+    # （以降は前回ご案内の「ベクトル化→ベクトル検索→参加者取得」処理）
     # 1) ChatGPT API でタグをベクトル化
     try:
         embed_resp = openai.Embedding.create(

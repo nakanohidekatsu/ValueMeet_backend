@@ -17,6 +17,9 @@ from . import mymodels
 from db_control.connect import engine
 from sqlalchemy import func
 
+from mymodels import Tag
+from pgvector.sqlalchemy import vector_distance
+
 # 環境変数の読み込み
 load_dotenv()
 
@@ -190,8 +193,28 @@ def get_recommended_users_by_tag(tag: str) -> List[mymodels.User]:
             select(mymodels.User).where(mymodels.User.user_id.in_(subquery)).limit(5)
         ).scalars().all()
 
-# === Participant関連 ===
+def find_meeting_ids_by_tag_vector(
+    db,
+    query_vector: list[float],
+    top_k: int = 5
+) -> list[int]:
+    """
+    query_vector との距離が近いタグを持つ会議IDを、
+    ベクトル距離の昇順で top_k 件返す
+    """
+    stmt = (
+        select(
+            Tag.meeting_id,
+            vector_distance(Tag.vector_embedding, query_vector).label("dist")
+        )
+        .order_by("dist")
+        .limit(top_k)
+    )
+    rows = db.execute(stmt).all()
+    # rows: [(meeting_id, dist), …]
+    return [row.meeting_id for row in rows]
 
+# === Participant関連 ===
 def create_participant(meeting_id: int, user_id: str, role_type: Optional[str]) -> int:
     """参加者を作成"""
     with SessionLocal() as db:
