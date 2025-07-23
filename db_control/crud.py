@@ -199,9 +199,8 @@ def find_meeting_ids_by_tag_vector(db: Session, query_vector: List[float], top_k
         tags_vector = Column(Vector(embedding_dim), nullable=False)
     """
     stmt = (
-        select(Meeting.id)
-        # l2_distance, cosine_distance, max_inner_product ... が選べる
-        .order_by(Meeting.tags_vector.cosine_distance(query_vector))
+        select(mymodels.Meeting.meeting_id)  # mymodels.Meeting として参照
+        .order_by(mymodels.Tag.vector_embedding.cosine_distance(query_vector))
         .limit(top_k)
     )
     return [row[0] for row in db.execute(stmt).all()]
