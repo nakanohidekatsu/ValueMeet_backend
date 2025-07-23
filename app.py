@@ -14,7 +14,7 @@ from typing import Optional, List
 
 from db_control.mymodels import User, Organization  # SQLAlchemy models
 from db_control.crud import SessionLocal
-import crud
+from db_control import crud
 
 # アプリケーション初期化時にテーブルを作成
 init_db()
