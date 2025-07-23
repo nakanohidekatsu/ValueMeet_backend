@@ -12,7 +12,7 @@ from db_control.create_tables import init_db
 from dotenv import load_dotenv
 from typing import Optional, List
 
-from mymodels import User, Organization  # SQLAlchemy models
+from db_control.mymodels import User, Organization  # SQLAlchemy models
 from database import SessionLocal
 import crud
 
