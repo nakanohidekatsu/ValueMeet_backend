@@ -20,7 +20,7 @@ from sqlalchemy import func
 # 環境変数の読み込み
 load_dotenv()
 
-# データベース接続設定
+# データベース接続設定　#
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://user:password@localhost/meeting_db")
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
