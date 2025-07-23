@@ -6,6 +6,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from pgvector.sqlalchemy import Vector  # PostgreSQL pgvector extension
+from sqlalchemy import Identity
 
 class Base(DeclarativeBase):
     pass
@@ -98,12 +99,14 @@ class Agenda(Base):
 
 class Tag(Base):
     __tablename__ = 'tags'
-
+    
+   # Postgres 10+ の IDENTITY で自動採番
     tag_id: Mapped[int] = mapped_column(
         Integer,
-        primary_key=True,
-        autoincrement=True
+        Identity(start=1, cycle=False),
+        primary_key=True
     )
+
     meeting_id: Mapped[int] = mapped_column(
         Integer,
         ForeignKey('meetings.meeting_id'),
