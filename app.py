@@ -272,59 +272,30 @@ async def generate_tags(topic: str = Query(..., description="抽出対象の文�
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"タグ生成に失敗しました: {str(e)}")
 
-@app.get("/recommend", response_model=List[RecommendUser])
-async def get_recommendations(
-    tag: str = Query(..., description="基準となるキーワード"),
-    top_k: int = Query(
-        5,
-        title="結果件数",
-        description="類似会議として返す上位件数。大きいほど広く拾います",
-        ge=1,
-        le=100
-    )
-):
-    """
-    おすすめ参加者API
-    tag: キーワード
-    top_k: 上位何件の類似会議IDを参照するか
-    """
-    # （以降は前回ご案内の「ベクトル化→ベクトル検索→参加者取得」処理）
-    # 1) ChatGPT API でタグをベクトル化
-    try:
-        embed_resp = client.embeddings.create(
-            model="text-embedding-3-small",
-            input=[tag]
+from sqlalchemy import select, func
+
+def find_meeting_ids_by_tag_vector(db: Session, query_vector: List[float], top_k: int = 5) -> List[int]:
+    # 距離 (cosine_distance) の式を一度定義しておく
+    distance_expr = mymodels.Tag.vector_embedding.cosine_distance(query_vector)
+
+    # 1) タグごとに最小距離だけを残すサブクエリを作成
+    subq = (
+        select(
+            mymodels.Tag.meeting_id.label("meeting_id"),
+            func.min(distance_expr).label("distance")
         )
-        query_vector = embed_resp.data[0].embedding
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"タグ埋め込みの取得に失敗: {e}")
+        .group_by(mymodels.Tag.meeting_id)
+        .subquery()
+    )
 
-    # 2) DB からベクトル検索で近傍タグを取得
-    try:
-        db = SessionLocal()
-        # crud 側で pgvector の <-> 演算子を使った検索を実装
-        similar_meeting_ids = crud.find_meeting_ids_by_tag_vector(db, query_vector, top_k=top_k)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"類似タグ検索に失敗: {e}")
+    # 2) ミーティングID を距離でソートして取得
+    stmt = (
+        select(subq.c.meeting_id)
+        .order_by(subq.c.distance)
+        .limit(top_k)
+    )
 
-    # 3) 参加者取得
-    try:
-        users = crud.get_users_by_meeting_ids(db, similar_meeting_ids)
-        result: List[RecommendUser] = []
-        for user in users:
-            org = crud.get_organization_by_id(db, user.organization_id)
-            result.append(
-                RecommendUser(
-                    organization_name=org.organization_name if org else "",
-                    name=user.name,
-                    user_id=user.user_id
-                )
-            )
-        return result
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"参加者取得に失敗: {e}")
-    finally:
-        db.close()
+    return db.execute(stmt).scalars().all()
         
 @app.post("/attend")
 async def create_attendance(attend: AttendCreate):
