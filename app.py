@@ -252,7 +252,7 @@ async def generate_tags(topic: str = Query(..., description="抽出対象の文�
     )
     try:
         # ChatGPT API呼び出し
-        response = openai.chat.completions.create(
+        response = response = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": "You are a helpful assistant that extracts keywords."},
