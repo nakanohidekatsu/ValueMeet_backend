@@ -110,10 +110,10 @@ class Tag(Base):
         Text,
         nullable=False
     )
-    vector_embedding: Mapped[list[float]] = mapped_column(
-        Vector(1536),
-        nullable=False
-    )
+    # vector_embedding: Mapped[list[float]] = mapped_column(
+    #     Vector(1536),
+    #     nullable=False
+    # )
 
 class Participant(Base):
     __tablename__ = 'participants'

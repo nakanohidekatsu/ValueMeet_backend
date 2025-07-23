@@ -224,18 +224,26 @@ async def create_agenda(agenda: AgendaCreate):
 async def register_tag(tag_data: TagRegister):
     """
     タグ登録API
-    ベクトル化したタグを登録
+    タグをベクトル化して登録
     """
     try:
+        # ① タグをベクトル化
+        embed_resp = client.embeddings.create(
+            model="text-embedding-3-small",
+            input=[tag_data.tag]
+        )
+        vector = embed_resp.data[0].embedding
+
+        # ② CRUD で保存
         tag_id = crud.create_tag(
             meeting_id=tag_data.meeting_id,
             tag=tag_data.tag,
-            vector_embedding=tag_data.vector_embedding
+            vector_embedding=vector
         )
-        
         return {"tag_id": tag_id, "message": "Tag registered successfully"}
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"タグ登録に失敗しました: {e}")
 
 @app.get("/tag_generate", response_model=TagGenerateResponse)
 async def generate_tags(topic: str = Query(..., description="抽出対象の文章")):
