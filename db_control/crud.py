@@ -17,7 +17,7 @@ from . import mymodels
 from db_control.connect import engine
 from sqlalchemy import func
 
-from mymodels import Tag
+from .mymodels import Tag
 from pgvector.sqlalchemy import vector_distance
 
 # 環境変数の読み込み
