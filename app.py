@@ -238,7 +238,10 @@ async def generate_tags(topic: str = Query(..., description="抽出対象の文�
     """
     # プロンプト作成
     prompt = (
-        f"以下の文章から主要なキーワードを5つ抽出し、JSONのリスト形式で出力してください。\n```{topic}```"
+        "以下の文章から主要なキーワードを5つ、"
+        "必ず**純粋な JSON 配列**（例: [\"A\",\"B\",\"C\",\"D\",\"E\"]）で"
+        "それ以外のコメントや説明を付けずに出力してください。\n"
+        f"文章:\n{topic}"
     )
     try:
         # ChatGPT API呼び出し
