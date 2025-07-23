@@ -98,9 +98,10 @@ app.add_middleware(
 # 環境変数の読み込み
 load_dotenv()
 
-# OpenAI APIキーの設定
-# openai.api_key = os.getenv("OPENAI_API_KEY")
-client = OpenAI()
+# OpenAIクライアントの初期化
+client = OpenAI(
+    api_key=os.getenv("OPENAI_API_KEY")
+)
 
 # データベース初期化
 @app.on_event("startup")
