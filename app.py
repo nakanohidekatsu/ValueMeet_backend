@@ -3,13 +3,14 @@
 from fastapi import FastAPI, HTTPException, Query, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field
-import json
 import os
+import json
+import openai
 
 from db_control import crud, mymodels
 from db_control.create_tables import init_db
 from dotenv import load_dotenv
-from typing import Optional
+from typing import Optional, List
 
 # アプリケーション初期化時にテーブルを作成
 init_db()
@@ -77,6 +78,11 @@ class NameSearchResult(BaseModel):
 
 app = FastAPI(title="Meeting Management API")
 
+
+# レスポンスモデル
+class TagGenerateResponse(BaseModel):
+    tags: List[str]
+
 # CORS設定
 app.add_middleware(
     CORSMiddleware,
@@ -85,9 +91,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 # 環境変数の読み込み
 load_dotenv()
+
+# OpenAI APIキーの設定
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
 # データベース初期化
 @app.on_event("startup")
@@ -223,18 +231,37 @@ async def register_tag(tag_data: TagRegister):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/tag_generate", response_model=TagGenerateResponse)
-async def generate_tags(topic: str = Query(...)):
+async def generate_tags(topic: str = Query(..., description="抽出対象の文章")):
     """
     タグ生成API
     レジュメからChatGPTを使ってキーワードを抽出する
     """
+    # プロンプト作成
+    prompt = (
+        f"以下の文章から主要なキーワードを5つ抽出し、JSONのリスト形式で出力してください。\n```{topic}```"
+    )
     try:
-        # ここではダミーの実装。実際にはChatGPT APIを呼び出す
-        tags = crud.generate_tags_from_topic(topic)
-        
+        # ChatGPT API呼び出し
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant that extracts keywords."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.2,
+            max_tokens=200
+        )
+        # 応答テキスト取得
+        content = response.choices[0].message.content.strip()
+        # JSONパース
+        tags = json.loads(content)
+        if not isinstance(tags, list):
+            raise ValueError("キーワードがリスト形式ではありません: " + content)
+
         return TagGenerateResponse(tags=tags)
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"タグ生成に失敗しました: {str(e)}")
 
 @app.get("/recommend", response_model=List[RecommendUser])
 async def get_recommendations(tag: str = Query(...)):
