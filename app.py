@@ -7,6 +7,7 @@ import os
 import json
 from openai import OpenAI
 
+from . import crud, mymodels
 from db_control import crud, mymodels
 from db_control.create_tables import init_db
 from dotenv import load_dotenv
