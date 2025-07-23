@@ -301,7 +301,7 @@ async def get_recommendations(
     try:
         db = SessionLocal()
         # crud 側で pgvector の <-> 演算子を使った検索を実装
-        similar_meeting_ids = crud.find_meeting_ids_by_tag_vector(db, query_vector, top_k=5)
+    #    similar_meeting_ids = crud.find_meeting_ids_by_tag_vector(db, query_vector, top_k=5)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"類似タグ検索に失敗: {e}")
 
