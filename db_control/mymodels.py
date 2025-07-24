@@ -99,14 +99,13 @@ class Agenda(Base):
 
 class Tag(Base):
     __tablename__ = 'tags'
-    
-   # Postgres 10+ の IDENTITY で自動採番
+
+    # 自動採番を有効化
     tag_id: Mapped[int] = mapped_column(
         Integer,
-        Identity(start=1, cycle=False),
-        primary_key=True
+        primary_key=True,
+        autoincrement=True
     )
-
     meeting_id: Mapped[int] = mapped_column(
         Integer,
         ForeignKey('meetings.meeting_id'),
@@ -120,7 +119,7 @@ class Tag(Base):
         Vector(1536),
         nullable=False
     )
-
+    
 class Participant(Base):
     __tablename__ = 'participants'
 

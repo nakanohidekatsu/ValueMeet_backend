@@ -1,8 +1,7 @@
 from db_control.mymodels import Base
 from db_control.connect import engine
 from sqlalchemy import inspect
-
-
+    
 def init_db():
     # インスペクターを作成
     inspector = inspect(engine)
