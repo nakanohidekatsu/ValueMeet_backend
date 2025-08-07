@@ -127,7 +127,7 @@ async def startup_event():
 # === API エンドポイント ===
 
 @app.get("/user_profile", response_model=UserProfileResponse)
-async def get_user_profile(user_id: str = Query(...)):
+async def get_usr_profile(user_id: str = Query(...)):
     """
     ユーザープロファイル取得API
     起動時（ログイン時）に初期画面に必要な情報を取得
