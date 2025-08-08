@@ -126,7 +126,7 @@ async def startup_event():
 
 # === API エンドポイント ===
 
-@app.get("/user_profile", response_model=UserProfileResponse)
+@app.get("/usr_profile", response_model=UserProfileResponse)
 async def get_usr_profile(user_id: str = Query(...)):
     """
     ユーザープロファイル取得API
