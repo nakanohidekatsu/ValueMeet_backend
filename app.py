@@ -55,11 +55,11 @@ class MeetingCreateResponse(BaseModel):
     meeting_id: int
     status: str = "success"
 
-# 修正: アジェンダに配列対応
+# アジェンダ作成（配列対応）
 class AgendaCreate(BaseModel):
     meeting_id: int
-    purpose: Optional[str] = None  # "||"で区切られた複数の目的
-    topic: Optional[str] = None    # "||"で区切られた複数のトピック
+    purpose: Optional[str] = None  # 後方互換性のため残す
+    topic: Optional[str] = None    # 後方互換性のため残す
     purposes: Optional[List[str]] = None  # 目的の配列（新規追加）
     topics: Optional[List[str]] = None    # トピックの配列（新規追加）
 
@@ -222,6 +222,7 @@ async def create_meeting(meeting: MeetingCreate):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# 1. アジェンダ登録APIの修正（配列対応）
 @app.post("/agenda")
 async def create_agenda(agenda: AgendaCreate):
     """
@@ -229,7 +230,7 @@ async def create_agenda(agenda: AgendaCreate):
     会議のレジュメを登録する（配列対応版）
     """
     try:
-        # 配列が渡された場合は"||"で結合
+        # 配列が渡された場合は"||"で結合して保存
         if agenda.purposes and isinstance(agenda.purposes, list):
             purpose_str = "||".join(filter(None, agenda.purposes))
         else:
@@ -278,7 +279,7 @@ async def register_tag(tag_data: TagRegister):
 @app.post("/tags_register_batch")
 async def register_tags_batch(tag_data: TagsRegisterBatch):
     """
-    タグ一括登録API（新規追加）
+    タグ一括登録API
     複数のタグをまとめてベクトル化して登録
     """
     try:
@@ -444,7 +445,7 @@ async def create_attendance(attend: AttendCreate):
 @app.post("/attend_batch")
 async def create_attendance_batch(attend_batch: AttendCreateBatch):
     """
-    参加者一括登録API（新規追加）
+    参加者一括登録API
     複数の参加者をまとめて登録する
     """
     try:
