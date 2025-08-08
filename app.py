@@ -159,10 +159,10 @@ async def get_meeting_list(
 ):
     """
     会議一覧取得API
-    ログインユーザーが参加する会議の一覧を表示
+    ログインユーザーが参加または作成する会議の一覧を表示
     """
     try:
-        meetings = crud.get_meetings_by_user(
+        meeting_details = crud.get_meetings_by_user_with_details(
             user_id=user_id,
             start_datetime=start_datetime,
             end_datetime=end_datetime,
@@ -171,23 +171,15 @@ async def get_meeting_list(
         )
         
         meeting_list = []
-        for meeting in meetings:
-            # 主催者情報取得
-            creator = crud.get_user_by_id(meeting.created_by)
-            creator_organization = crud.get_organization_by_id(creator.organization_id) if creator else None
-            
-            # 参加者の役割取得
-            participant = crud.get_participant_role(meeting.meeting_id, user_id)
-            role_type = participant.role_type if participant else None
-            
+        for meeting, creator_name, creator_organization_name, role_type in meeting_details:
             meeting_item = MeetingListItem(
                 meeting_id=meeting.meeting_id,
                 title=meeting.title,
                 meeting_type=meeting.meeting_type,
                 meeting_mode=meeting.meeting_mode,
                 date_time=meeting.date_time.strftime("%Y-%m-%dT%H:%M:00"),
-                name=creator.name if creator else "",
-                organization_name=creator_organization.organization_name if creator_organization else "",
+                name=creator_name or "",
+                organization_name=creator_organization_name or "",
                 role_type=role_type
             )
             meeting_list.append(meeting_item)

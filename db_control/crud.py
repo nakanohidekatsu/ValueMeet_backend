@@ -100,13 +100,30 @@ def create_meeting(title: str, meeting_type: Optional[str], meeting_mode: Option
 def get_meetings_by_user(user_id: str, start_datetime: Optional[str] = None,
                         end_datetime: Optional[str] = None, organization_id: Optional[int] = None,
                         meeting_type: Optional[str] = None) -> List[mymodels.Meeting]:
-    """ユーザーが参加する会議一覧を取得"""
+    """ユーザーが参加または作成する会議一覧を取得（修正版）"""
     with SessionLocal() as db:
-        # 基本クエリ：参加者テーブルとJOIN
-        query = (
-            select(mymodels.Meeting)
+        # サブクエリ1: ユーザーが参加する会議
+        participated_meetings = (
+            select(mymodels.Meeting.meeting_id)
             .join(mymodels.Participant, mymodels.Meeting.meeting_id == mymodels.Participant.meeting_id)
             .where(mymodels.Participant.user_id == user_id)
+        )
+        
+        # サブクエリ2: ユーザーが作成した会議  
+        created_meetings = (
+            select(mymodels.Meeting.meeting_id)
+            .where(mymodels.Meeting.created_by == user_id)
+        )
+        
+        # メインクエリ: 両方のサブクエリの結果を統合
+        query = (
+            select(mymodels.Meeting)
+            .where(
+                or_(
+                    mymodels.Meeting.meeting_id.in_(participated_meetings),
+                    mymodels.Meeting.meeting_id.in_(created_meetings)
+                )
+            )
         )
         
         # 日時フィルタ
@@ -133,7 +150,6 @@ def get_meetings_by_user(user_id: str, start_datetime: Optional[str] = None,
         query = query.order_by(mymodels.Meeting.date_time)
         
         return db.execute(query).scalars().all()
-
 # === Agenda関連 ===
 
 def create_agenda(meeting_id: int, purpose: Optional[str], topic: Optional[str]) -> int:
@@ -259,6 +275,58 @@ def get_users_by_meeting_ids(
     )
     return db.execute(stmt).scalars().all()
 
+def get_meetings_by_user_with_details(user_id: str, start_datetime: Optional[str] = None,
+                        end_datetime: Optional[str] = None, organization_id: Optional[int] = None,
+                        meeting_type: Optional[str] = None):
+    """ユーザーが参加または作成した会議一覧を詳細情報と共に取得（パフォーマンス最適化版）"""
+    with SessionLocal() as db:
+        # 基本クエリ：会議、主催者、主催者組織、参加者役割を一度に取得
+        query = (
+            select(
+                mymodels.Meeting,
+                mymodels.User.name.label('creator_name'),
+                mymodels.Organization.organization_name.label('creator_organization_name'),
+                mymodels.Participant.role_type
+            )
+            .outerjoin(mymodels.User, mymodels.Meeting.created_by == mymodels.User.user_id)
+            .outerjoin(mymodels.Organization, mymodels.User.organization_id == mymodels.Organization.organization_id)
+            .outerjoin(
+                mymodels.Participant, 
+                and_(
+                    mymodels.Meeting.meeting_id == mymodels.Participant.meeting_id,
+                    mymodels.Participant.user_id == user_id
+                )
+            )
+            .where(
+                or_(
+                    mymodels.Meeting.created_by == user_id,  # ユーザーが作成した会議
+                    mymodels.Participant.user_id == user_id  # ユーザーが参加する会議
+                )
+            )
+        )
+        
+        # 日時フィルタ
+        if start_datetime:
+            start_dt = datetime.strptime(start_datetime, "%Y/%m/%d %H:%M")
+            query = query.where(mymodels.Meeting.date_time >= start_dt)
+        
+        if end_datetime:
+            end_dt = datetime.strptime(end_datetime, "%Y/%m/%d %H:%M")
+            query = query.where(mymodels.Meeting.date_time <= end_dt)
+        
+        # 組織フィルタ（主催者の組織）
+        if organization_id:
+            query = query.where(mymodels.User.organization_id == organization_id)
+        
+        # 会議タイプフィルタ
+        if meeting_type:
+            query = query.where(mymodels.Meeting.meeting_type == meeting_type)
+        
+        # 日時順でソート
+        query = query.order_by(mymodels.Meeting.date_time)
+        
+        return db.execute(query).all()
+    
 
 # === データベース初期化用の関数 ===
 
