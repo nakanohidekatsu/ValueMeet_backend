@@ -1,4 +1,4 @@
-# crud.py
+# db_control/crud.py
 import platform
 print("platform", platform.uname())
 

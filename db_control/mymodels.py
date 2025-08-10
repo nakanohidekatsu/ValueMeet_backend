@@ -1,5 +1,4 @@
 # mymodels.py
-# mymodels.py
 
 from sqlalchemy import (
     Integer, String, Text, DateTime, Date,

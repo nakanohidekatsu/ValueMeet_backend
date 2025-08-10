@@ -1,4 +1,4 @@
-# app.py - 超シンプル修正版（認証機能重点）
+# app.py
 
 from fastapi import FastAPI, Depends, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -421,6 +421,130 @@ async def create_meeting(meeting: MeetingCreate):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# app.pyに追加すべきエンドポイント
+
+@app.get("/department_members", response_model=List[DepartmentMember])
+async def get_department_members(
+    organization_id: int = Query(...),
+    db: Session = Depends(get_db)
+):
+    """部内メンバー一覧取得API"""
+    try:
+        # 組織に所属するユーザーを取得
+        query = text("""
+            SELECT u.user_id, u.name, o.organization_name
+            FROM users u
+            LEFT JOIN organizations o ON u.organization_id = o.organization_id
+            WHERE u.organization_id = :organization_id
+            ORDER BY u.name
+        """)
+        
+        result = db.execute(query, {"organization_id": organization_id})
+        members = result.fetchall()
+        
+        return [
+            DepartmentMember(
+                user_id=member.user_id,
+                name=member.name,
+                organization_name=member.organization_name or ""
+            )
+            for member in members
+        ]
+    
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, 
+            detail=f"部内メンバー取得中にエラーが発生しました: {str(e)}"
+        )
+
+@app.get("/department_meetings", response_model=List[MeetingListItem])  
+async def get_department_meetings(
+    organization_id: int = Query(...),
+    start_datetime: Optional[str] = Query(None),
+    end_datetime: Optional[str] = Query(None),
+    meeting_type: Optional[str] = Query(None),
+    db: Session = Depends(get_db)
+):
+    """部内会議一覧取得API"""
+    try:
+        # 組織に所属するユーザーが作成または参加した会議を取得
+        query = text("""
+            SELECT DISTINCT m.meeting_id, m.title, m.meeting_type, m.meeting_mode, 
+                   m.date_time, u.name, o.organization_name, p.role_type
+            FROM meetings m
+            LEFT JOIN users u ON m.created_by = u.user_id
+            LEFT JOIN organizations o ON u.organization_id = o.organization_id
+            LEFT JOIN participants p ON m.meeting_id = p.meeting_id
+            LEFT JOIN users pu ON p.user_id = pu.user_id
+            WHERE (u.organization_id = :organization_id 
+                   OR pu.organization_id = :organization_id)
+            ORDER BY m.date_time
+        """)
+        
+        result = db.execute(query, {"organization_id": organization_id})
+        meetings = result.fetchall()
+        
+        meeting_list = []
+        for meeting in meetings:
+            meeting_item = MeetingListItem(
+                meeting_id=meeting.meeting_id,
+                title=meeting.title,
+                meeting_type=meeting.meeting_type,
+                meeting_mode=meeting.meeting_mode,
+                date_time=meeting.date_time.strftime("%Y-%m-%dT%H:%M:00"),
+                name=meeting.name or "",
+                organization_name=meeting.organization_name or "",
+                role_type=meeting.role_type
+            )
+            meeting_list.append(meeting_item)
+        
+        return meeting_list
+    
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, 
+            detail=f"部内会議一覧取得中にエラーが発生しました: {str(e)}"
+        )
+
+@app.get("/member_meetings", response_model=List[MeetingListItem])
+async def get_member_meetings(
+    member_id: str = Query(...),
+    start_datetime: Optional[str] = Query(None),
+    end_datetime: Optional[str] = Query(None),
+    meeting_type: Optional[str] = Query(None),
+    db: Session = Depends(get_db)
+):
+    """担当者の会議一覧取得API"""
+    try:
+        meeting_details = crud.get_meetings_by_user_with_details(
+            user_id=member_id,
+            start_datetime=start_datetime,
+            end_datetime=end_datetime,
+            meeting_type=meeting_type
+        )
+        
+        meeting_list = []
+        for meeting, creator_name, creator_organization_name, role_type in meeting_details:
+            meeting_item = MeetingListItem(
+                meeting_id=meeting.meeting_id,
+                title=meeting.title,
+                meeting_type=meeting.meeting_type,
+                meeting_mode=meeting.meeting_mode,
+                date_time=meeting.date_time.strftime("%Y-%m-%dT%H:%M:00"),
+                name=creator_name or "",
+                organization_name=creator_organization_name or "",
+                role_type=role_type
+            )
+            meeting_list.append(meeting_item)
+        
+        return meeting_list
+    
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, 
+            detail=f"担当者会議一覧取得中にエラーが発生しました: {str(e)}"
+        )
+        
 # === デバッグ用エンドポイント ===
 
 @app.get("/debug/db-test")
