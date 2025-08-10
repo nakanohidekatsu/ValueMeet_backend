@@ -326,6 +326,123 @@ def get_meetings_by_user_with_details(user_id: str, start_datetime: Optional[str
         query = query.order_by(mymodels.Meeting.date_time)
         
         return db.execute(query).all()
+
+def get_users_by_organization(organization_id: int) -> List[mymodels.User]:
+    """組織に所属するユーザー一覧を取得"""
+    with SessionLocal() as db:
+        return db.execute(
+            select(mymodels.User).where(mymodels.User.organization_id == organization_id)
+        ).scalars().all()
+
+def get_meetings_by_organization_with_details(
+    organization_id: int, 
+    start_datetime: Optional[str] = None,
+    end_datetime: Optional[str] = None, 
+    meeting_type: Optional[str] = None
+):
+    """組織の会議一覧を詳細情報と共に取得"""
+    with SessionLocal() as db:
+        # 組織に所属するユーザーが作成または参加した会議を取得
+        query = (
+            select(
+                mymodels.Meeting,
+                mymodels.User.name.label('creator_name'),
+                mymodels.Organization.organization_name.label('creator_organization_name'),
+                mymodels.Participant.role_type
+            )
+            .outerjoin(mymodels.User, mymodels.Meeting.created_by == mymodels.User.user_id)
+            .outerjoin(mymodels.Organization, mymodels.User.organization_id == mymodels.Organization.organization_id)
+            .outerjoin(mymodels.Participant, mymodels.Meeting.meeting_id == mymodels.Participant.meeting_id)
+            .where(
+                or_(
+                    # 組織のメンバーが作成した会議
+                    mymodels.User.organization_id == organization_id,
+                    # 組織のメンバーが参加している会議
+                    mymodels.Participant.user_id.in_(
+                        select(mymodels.User.user_id).where(mymodels.User.organization_id == organization_id)
+                    )
+                )
+            )
+        )
+        
+        # 日時フィルタ
+        if start_datetime:
+            start_dt = datetime.strptime(start_datetime, "%Y/%m/%d %H:%M")
+            query = query.where(mymodels.Meeting.date_time >= start_dt)
+        
+        if end_datetime:
+            end_dt = datetime.strptime(end_datetime, "%Y/%m/%d %H:%M")
+            query = query.where(mymodels.Meeting.date_time <= end_dt)
+        
+        # 会議タイプフィルタ
+        if meeting_type:
+            query = query.where(mymodels.Meeting.meeting_type == meeting_type)
+        
+        # 日時順でソート
+        query = query.order_by(mymodels.Meeting.date_time)
+        
+        return db.execute(query).all()
+
+def get_meeting_by_id(meeting_id: int) -> Optional[mymodels.Meeting]:
+    """会議IDで会議情報を取得"""
+    with SessionLocal() as db:
+        return db.execute(
+            select(mymodels.Meeting).where(mymodels.Meeting.meeting_id == meeting_id)
+        ).scalar_one_or_none()
+
+def delete_meeting_and_related_data(meeting_id: int):
+    """会議とその関連データを削除"""
+    with SessionLocal() as db:
+        try:
+            # トランザクション開始
+            
+            # 関連するタグを削除
+            db.execute(
+                delete(mymodels.Tag).where(mymodels.Tag.meeting_id == meeting_id)
+            )
+            
+            # 関連する参加者を削除
+            db.execute(
+                delete(mymodels.Participant).where(mymodels.Participant.meeting_id == meeting_id)
+            )
+            
+            # 関連するアジェンダを削除
+            db.execute(
+                delete(mymodels.Agenda).where(mymodels.Agenda.meeting_id == meeting_id)
+            )
+            
+            # ファイル添付があれば削除
+            db.execute(
+                delete(mymodels.FileAttachment).where(mymodels.FileAttachment.meeting_id == meeting_id)
+            )
+            
+            # 会議評価があれば削除
+            db.execute(
+                delete(mymodels.MeetingEvaluation).where(mymodels.MeetingEvaluation.meeting_id == meeting_id)
+            )
+            
+            # TODOがあれば削除
+            db.execute(
+                delete(mymodels.Todo).where(mymodels.Todo.meeting_id == meeting_id)
+            )
+            
+            # 議事録があれば削除
+            db.execute(
+                delete(mymodels.Transcript).where(mymodels.Transcript.meeting_id == meeting_id)
+            )
+            
+            # 最後に会議本体を削除
+            db.execute(
+                delete(mymodels.Meeting).where(mymodels.Meeting.meeting_id == meeting_id)
+            )
+            
+            # コミット
+            db.commit()
+            
+        except Exception as e:
+            # エラー時はロールバック
+            db.rollback()
+            raise e
     
 
 # === データベース初期化用の関数 ===

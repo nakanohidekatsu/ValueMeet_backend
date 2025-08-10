@@ -74,6 +74,12 @@ class Meeting(Base):
         ForeignKey('users.user_id'),
         nullable=True
     )
+    # 一時保存機能のためのstatusフィールドを追加
+    status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=True,
+        default='scheduled'  # 'scheduled', 'draft', 'completed'
+    )
 
 class Agenda(Base):
     __tablename__ = 'agendas'
@@ -243,5 +249,50 @@ class Transcript(Base):
     timestamp: Mapped[DateTime] = mapped_column(
         DateTime,
         nullable=True
+    )
+
+# 新規追加：会議評価テーブル
+class MeetingEvaluation(Base):
+    __tablename__ = 'meeting_evaluations'
+
+    evaluation_id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        autoincrement=True
+    )
+    meeting_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey('meetings.meeting_id'),
+        nullable=False
+    )
+    user_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey('users.user_id'),
+        nullable=False
+    )
+    satisfaction: Mapped[int] = mapped_column(
+        Integer,
+        nullable=True  # 1-5の評価
+    )
+    rejoin_intent: Mapped[int] = mapped_column(
+        Integer,
+        nullable=True  # 1-5の評価
+    )
+    self_contribution: Mapped[int] = mapped_column(
+        Integer,
+        nullable=True  # 1-5の評価
+    )
+    facilitator_rating: Mapped[int] = mapped_column(
+        Integer,
+        nullable=True  # 1-5の評価
+    )
+    comment: Mapped[str] = mapped_column(
+        Text,
+        nullable=True
+    )
+    created_at: Mapped[DateTime] = mapped_column(
+        DateTime,
+        nullable=True,
+        default=lambda: __import__('datetime').datetime.utcnow()
     )
     

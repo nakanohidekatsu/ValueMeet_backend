@@ -33,6 +33,11 @@ class UserProfileResponse(BaseModel):
     name: str
     organization_id: int
     organization_name: str
+    
+class DepartmentMember(BaseModel):
+    user_id: str
+    name: str
+    organization_name: str
 
 class MeetingListItem(BaseModel):
     meeting_id: int
@@ -524,6 +529,129 @@ async def debug_get_meeting_tags(meeting_id: int):
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         db.close()
+        
+@app.get("/department_meetings", response_model=List[MeetingListItem])
+async def get_department_meetings(
+    organization_id: int = Query(..., description="組織ID"),
+    start_datetime: Optional[str] = Query(None),
+    end_datetime: Optional[str] = Query(None),
+    meeting_type: Optional[str] = Query(None)
+):
+    """
+    部内会議一覧取得API
+    指定された組織の全ての会議を取得
+    """
+    try:
+        meeting_details = crud.get_meetings_by_organization_with_details(
+            organization_id=organization_id,
+            start_datetime=start_datetime,
+            end_datetime=end_datetime,
+            meeting_type=meeting_type
+        )
+        
+        meeting_list = []
+        for meeting, creator_name, creator_organization_name, role_type in meeting_details:
+            meeting_item = MeetingListItem(
+                meeting_id=meeting.meeting_id,
+                title=meeting.title,
+                meeting_type=meeting.meeting_type,
+                meeting_mode=meeting.meeting_mode,
+                date_time=meeting.date_time.strftime("%Y-%m-%dT%H:%M:00"),
+                name=creator_name or "",
+                organization_name=creator_organization_name or "",
+                role_type=role_type
+            )
+            meeting_list.append(meeting_item)
+        
+        return meeting_list
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/member_meetings", response_model=List[MeetingListItem])
+async def get_member_meetings(
+    member_id: str = Query(..., description="メンバーのユーザーID"),
+    start_datetime: Optional[str] = Query(None),
+    end_datetime: Optional[str] = Query(None),
+    meeting_type: Optional[str] = Query(None)
+):
+    """
+    指定メンバーの会議一覧取得API
+    指定されたメンバーが作成または参加する会議の一覧を取得
+    """
+    try:
+        meeting_details = crud.get_meetings_by_user_with_details(
+            user_id=member_id,
+            start_datetime=start_datetime,
+            end_datetime=end_datetime,
+            meeting_type=meeting_type
+        )
+        
+        meeting_list = []
+        for meeting, creator_name, creator_organization_name, role_type in meeting_details:
+            meeting_item = MeetingListItem(
+                meeting_id=meeting.meeting_id,
+                title=meeting.title,
+                meeting_type=meeting.meeting_type,
+                meeting_mode=meeting.meeting_mode,
+                date_time=meeting.date_time.strftime("%Y-%m-%dT%H:%M:00"),
+                name=creator_name or "",
+                organization_name=creator_organization_name or "",
+                role_type=role_type
+            )
+            meeting_list.append(meeting_item)
+        
+        return meeting_list
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/department_members", response_model=List[DepartmentMember])
+async def get_department_members(
+    organization_id: int = Query(..., description="組織ID")
+):
+    """
+    部内メンバー一覧取得API
+    指定された組織に所属するメンバーの一覧を取得
+    """
+    try:
+        members = crud.get_users_by_organization(organization_id)
+        
+        member_list = []
+        for user in members:
+            organization = crud.get_organization_by_id(user.organization_id)
+            
+            member = DepartmentMember(
+                user_id=user.user_id,
+                name=user.name,
+                organization_name=organization.organization_name if organization else ""
+            )
+            member_list.append(member)
+        
+        # 名前でソート
+        member_list.sort(key=lambda x: x.name)
+        
+        return member_list
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/meeting/{meeting_id}")
+async def delete_meeting(meeting_id: int):
+    """
+    会議削除API
+    指定された会議を削除する
+    """
+    try:
+        # 会議の存在確認
+        meeting = crud.get_meeting_by_id(meeting_id)
+        if not meeting:
+            raise HTTPException(status_code=404, detail="Meeting not found")
+        
+        # 関連データの削除
+        crud.delete_meeting_and_related_data(meeting_id)
+        
+        return {"status": "success", "message": "Meeting deleted successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 # === ヘルスチェック ===
 
@@ -537,3 +665,4 @@ async def health_check():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
+    
