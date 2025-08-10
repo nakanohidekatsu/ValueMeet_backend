@@ -1,4 +1,5 @@
 # mymodels.py
+# mymodels.py
 
 from sqlalchemy import (
     Integer, String, Text, DateTime, Date,
@@ -40,7 +41,12 @@ class User(Base):
         nullable=False,
         unique=True
     )
-    organization_id: Mapped[int] = mapped_column(
+    # 認証機能のためにpasswordフィールドを追加
+    password: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False
+    )
+    organization_id: Mapped[Optional[int]] = mapped_column(
         Integer,
         ForeignKey('organizations.organization_id'),
         nullable=True
@@ -58,11 +64,11 @@ class Meeting(Base):
         String(200),
         nullable=False
     )
-    meeting_type: Mapped[str] = mapped_column(
+    meeting_type: Mapped[Optional[str]] = mapped_column(
         String(50),
         nullable=True
     )
-    meeting_mode: Mapped[str] = mapped_column(
+    meeting_mode: Mapped[Optional[str]] = mapped_column(
         String(20),
         nullable=True
     )
@@ -70,13 +76,13 @@ class Meeting(Base):
         DateTime,
         nullable=False
     )
-    created_by: Mapped[str] = mapped_column(
+    created_by: Mapped[Optional[str]] = mapped_column(
         String(36),
         ForeignKey('users.user_id'),
         nullable=True
     )
     # 一時保存機能のためのstatusフィールドを追加
-    status: Mapped[str] = mapped_column(
+    status: Mapped[Optional[str]] = mapped_column(
         String(20),
         nullable=True,
         default='scheduled'  # 'scheduled', 'draft', 'completed'
@@ -90,16 +96,16 @@ class Agenda(Base):
         primary_key=True,
         autoincrement=True
     )
-    meeting_id: Mapped[int] = mapped_column(
+    meeting_id: Mapped[Optional[int]] = mapped_column(
         Integer,
         ForeignKey('meetings.meeting_id'),
         nullable=True
     )
-    purpose: Mapped[str] = mapped_column(
+    purpose: Mapped[Optional[str]] = mapped_column(
         Text,
         nullable=True
     )
-    topic: Mapped[str] = mapped_column(
+    topic: Mapped[Optional[str]] = mapped_column(
         Text,
         nullable=True
     )
@@ -113,7 +119,7 @@ class Tag(Base):
         primary_key=True,
         autoincrement=True
     )
-    meeting_id: Mapped[int] = mapped_column(
+    meeting_id: Mapped[Optional[int]] = mapped_column(
         Integer,
         ForeignKey('meetings.meeting_id'),
         nullable=True
@@ -135,17 +141,17 @@ class Participant(Base):
         primary_key=True,
         autoincrement=True
     )
-    meeting_id: Mapped[int] = mapped_column(
+    meeting_id: Mapped[Optional[int]] = mapped_column(
         Integer,
         ForeignKey('meetings.meeting_id'),
         nullable=True
     )
-    user_id: Mapped[str] = mapped_column(
+    user_id: Mapped[Optional[str]] = mapped_column(
         String(36),
         ForeignKey('users.user_id'),
         nullable=True
     )
-    role_type: Mapped[str] = mapped_column(
+    role_type: Mapped[Optional[str]] = mapped_column(
         String(36),
         nullable=True
     )
@@ -158,12 +164,12 @@ class Todo(Base):
         primary_key=True,
         autoincrement=True
     )
-    meeting_id: Mapped[int] = mapped_column(
+    meeting_id: Mapped[Optional[int]] = mapped_column(
         Integer,
         ForeignKey('meetings.meeting_id'),
         nullable=True
     )
-    assigned_to: Mapped[str] = mapped_column(
+    assigned_to: Mapped[Optional[str]] = mapped_column(
         String(36),
         ForeignKey('users.user_id'),
         nullable=True
@@ -172,11 +178,11 @@ class Todo(Base):
         Text,
         nullable=False
     )
-    status: Mapped[str] = mapped_column(
+    status: Mapped[Optional[str]] = mapped_column(
         String(20),
         nullable=True
     )
-    due_date: Mapped[Date] = mapped_column(
+    due_date: Mapped[Optional[Date]] = mapped_column(
         Date,
         nullable=True
     )
@@ -189,17 +195,17 @@ class Reminder(Base):
         primary_key=True,
         autoincrement=True
     )
-    user_id: Mapped[str] = mapped_column(
+    user_id: Mapped[Optional[str]] = mapped_column(
         String(36),
         ForeignKey('users.user_id'),
         nullable=True
     )
-    todo_id: Mapped[int] = mapped_column(
+    todo_id: Mapped[Optional[int]] = mapped_column(
         Integer,
         ForeignKey('todos.todo_id'),
         nullable=True
     )
-    remind_at: Mapped[DateTime] = mapped_column(
+    remind_at: Mapped[Optional[DateTime]] = mapped_column(
         DateTime,
         nullable=True
     )
@@ -211,16 +217,16 @@ class FileAttachment(Base):
         String(36),
         primary_key=True
     )
-    meeting_id: Mapped[int] = mapped_column(
+    meeting_id: Mapped[Optional[int]] = mapped_column(
         Integer,
         ForeignKey('meetings.meeting_id'),
         nullable=True
     )
-    filename: Mapped[str] = mapped_column(
+    filename: Mapped[Optional[str]] = mapped_column(
         String(255),
         nullable=True
     )
-    file_url: Mapped[str] = mapped_column(
+    file_url: Mapped[Optional[str]] = mapped_column(
         Text,
         nullable=True
     )
@@ -233,12 +239,12 @@ class Transcript(Base):
         primary_key=True,
         autoincrement=True
     )
-    meeting_id: Mapped[int] = mapped_column(
+    meeting_id: Mapped[Optional[int]] = mapped_column(
         Integer,
         ForeignKey('meetings.meeting_id'),
         nullable=True
     )
-    speaker_id: Mapped[str] = mapped_column(
+    speaker_id: Mapped[Optional[str]] = mapped_column(
         String(36),
         ForeignKey('users.user_id'),
         nullable=True
@@ -247,7 +253,7 @@ class Transcript(Base):
         Text,
         nullable=False
     )
-    timestamp: Mapped[DateTime] = mapped_column(
+    timestamp: Mapped[Optional[DateTime]] = mapped_column(
         DateTime,
         nullable=True
     )
@@ -271,49 +277,29 @@ class MeetingEvaluation(Base):
         ForeignKey('users.user_id'),
         nullable=False
     )
-    satisfaction: Mapped[int] = mapped_column(
+    satisfaction: Mapped[Optional[int]] = mapped_column(
         Integer,
         nullable=True  # 1-5の評価
     )
-    rejoin_intent: Mapped[int] = mapped_column(
+    rejoin_intent: Mapped[Optional[int]] = mapped_column(
         Integer,
         nullable=True  # 1-5の評価
     )
-    self_contribution: Mapped[int] = mapped_column(
+    self_contribution: Mapped[Optional[int]] = mapped_column(
         Integer,
         nullable=True  # 1-5の評価
     )
-    facilitator_rating: Mapped[int] = mapped_column(
+    facilitator_rating: Mapped[Optional[int]] = mapped_column(
         Integer,
         nullable=True  # 1-5の評価
     )
-    comment: Mapped[str] = mapped_column(
+    comment: Mapped[Optional[str]] = mapped_column(
         Text,
         nullable=True
     )
-    created_at: Mapped[DateTime] = mapped_column(
+    created_at: Mapped[Optional[DateTime]] = mapped_column(
         DateTime,
         nullable=True,
         default=lambda: __import__('datetime').datetime.utcnow()
     )
     
-    # === 認証関連 ===
-
-class LoginRequest(Base):
-    user_id: str
-    password: str
-
-class LoginResponse(Base):
-    user_id: str
-    name: str
-    email: str
-    organization_id: int
-    organization_name: Optional[str] = None
-
-class ResetPasswordRequest(Base):
-    admin_user_id: str
-    target_user_id: str
-    new_password: str
-
-class MessageResponse(Base):
-    message: str

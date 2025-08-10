@@ -1,6 +1,7 @@
 # app.py
+# app.py
 
-from fastapi import FastAPI, HTTPException, Query, Depends, status
+from fastapi import FastAPI, Depends, HTTPException, Query, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field
 import os
@@ -18,6 +19,9 @@ from typing import Optional, List
 
 from db_control.crud import SessionLocal
 from db_control import crud
+
+# 修正: 相対importから絶対importに変更
+from schemas import LoginRequest, LoginResponse, ResetPasswordRequest, MessageResponse
 from sqlalchemy.orm import Session
 
 # アプリケーション初期化時にテーブルを作成
@@ -174,7 +178,7 @@ async def login(request: LoginRequest):
 @app.post("/auth/reset-password", response_model=MessageResponse)
 async def reset_password(request: ResetPasswordRequest):
     """パスワード初期化（管理者専用）"""
-    conn = get_db_connection()
+    conn = crud.get_db_connection()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             # 管理者権限チェック
@@ -213,7 +217,7 @@ async def reset_password(request: ResetPasswordRequest):
 @app.get("/auth/validate-token")
 async def validate_token(user_id: str):
     """トークン検証（セッション維持用）"""
-    conn = get_db_connection()
+    conn = crud.get_db_connection()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("""
