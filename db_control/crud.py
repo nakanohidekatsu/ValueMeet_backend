@@ -9,7 +9,7 @@ import sqlalchemy
 from sqlalchemy.orm import sessionmaker, Session
 import json
 import pandas as pd
-
+import psycopg2
 from datetime import datetime, date
 from typing import List, Optional
 import os
@@ -51,6 +51,19 @@ def get_db():
         yield db
     finally:
         db.close()
+
+# === 認証関連 ===
+def get_db_connection():
+    """データベース接続を取得"""
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        return conn
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"データベース接続エラー: {str(e)}")
+
+def hash_password(password: str) -> str:
+    """パスワードをSHA-256でハッシュ化"""
+    return hashlib.sha256(password.encode()).hexdigest()
 
 # === User関連 ===
 

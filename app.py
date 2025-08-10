@@ -6,6 +6,9 @@ from pydantic import BaseModel, ConfigDict, Field
 import os
 import json
 from openai import OpenAI
+import psycopg2
+from psycopg2.extras import RealDictCursor
+import hashlib
 
 # from . import crud, mymodels
 from db_control import crud, mymodels
@@ -130,6 +133,115 @@ async def startup_event():
     init_db()
 
 # === API エンドポイント ===
+@app.post("/auth/login", response_model=LoginResponse)
+async def login(request: LoginRequest):
+    """ログイン認証"""
+    conn = crud.get_db_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            # ユーザー情報を取得（組織名も含む）
+            cur.execute("""
+                SELECT u.user_id, u.name, u.email, u.organization_id, u.password, o.organization_name
+                FROM users u
+                LEFT JOIN organizations o ON u.organization_id = o.organization_id
+                WHERE u.user_id = %s
+            """, (request.user_id,))
+            
+            user = cur.fetchone()
+            
+            if not user:
+                raise HTTPException(status_code=401, detail="ユーザーIDまたはパスワードが正しくありません")
+            
+            # パスワード検証
+            if user['password'] != request.password:
+                raise HTTPException(status_code=401, detail="ユーザーIDまたはパスワードが正しくありません")
+            
+            return LoginResponse(
+                user_id=user['user_id'],
+                name=user['name'],
+                email=user['email'],
+                organization_id=user['organization_id'],
+                organization_name=user['organization_name']
+            )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"ログイン処理中にエラーが発生しました: {str(e)}")
+    finally:
+        conn.close()
+
+@app.post("/auth/reset-password", response_model=MessageResponse)
+async def reset_password(request: ResetPasswordRequest):
+    """パスワード初期化（管理者専用）"""
+    conn = get_db_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            # 管理者権限チェック
+            if request.admin_user_id != "admin":
+                raise HTTPException(status_code=403, detail="この機能は管理者のみ利用できます")
+            
+            # 管理者の存在確認
+            cur.execute("SELECT user_id FROM users WHERE user_id = %s", (request.admin_user_id,))
+            if not cur.fetchone():
+                raise HTTPException(status_code=403, detail="管理者ユーザーが見つかりません")
+            
+            # 対象ユーザーの存在確認
+            cur.execute("SELECT user_id FROM users WHERE user_id = %s", (request.target_user_id,))
+            if not cur.fetchone():
+                raise HTTPException(status_code=404, detail="対象ユーザーが見つかりません")
+            
+            # パスワード更新
+            cur.execute("""
+                UPDATE users 
+                SET password = %s 
+                WHERE user_id = %s
+            """, (request.new_password, request.target_user_id))
+            
+            conn.commit()
+            
+            return MessageResponse(message=f"ユーザー {request.target_user_id} のパスワードを初期化しました")
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"パスワード初期化中にエラーが発生しました: {str(e)}")
+    finally:
+        conn.close()
+
+@app.get("/auth/validate-token")
+async def validate_token(user_id: str):
+    """トークン検証（セッション維持用）"""
+    conn = get_db_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
+                SELECT u.user_id, u.name, u.email, u.organization_id, o.organization_name
+                FROM users u
+                LEFT JOIN organizations o ON u.organization_id = o.organization_id
+                WHERE u.user_id = %s
+            """, (user_id,))
+            
+            user = cur.fetchone()
+            
+            if not user:
+                raise HTTPException(status_code=401, detail="無効なユーザーです")
+            
+            return LoginResponse(
+                user_id=user['user_id'],
+                name=user['name'],
+                email=user['email'],
+                organization_id=user['organization_id'],
+                organization_name=user['organization_name']
+            )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"トークン検証中にエラーが発生しました: {str(e)}")
+    finally:
+        conn.close()
 
 @app.get("/usr_profile", response_model=UserProfileResponse)
 async def get_usr_profile(user_id: str = Query(...)):

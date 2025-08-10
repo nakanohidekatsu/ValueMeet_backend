@@ -7,6 +7,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from pgvector.sqlalchemy import Vector  # PostgreSQL pgvector extension
 from sqlalchemy import Identity
+from typing import Optional
 
 class Base(DeclarativeBase):
     pass
@@ -296,3 +297,23 @@ class MeetingEvaluation(Base):
         default=lambda: __import__('datetime').datetime.utcnow()
     )
     
+    # === 認証関連 ===
+
+class LoginRequest(Base):
+    user_id: str
+    password: str
+
+class LoginResponse(Base):
+    user_id: str
+    name: str
+    email: str
+    organization_id: int
+    organization_name: Optional[str] = None
+
+class ResetPasswordRequest(Base):
+    admin_user_id: str
+    target_user_id: str
+    new_password: str
+
+class MessageResponse(Base):
+    message: str
