@@ -5,11 +5,22 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field
 import os
 import json
+from openai import OpenAI
 from dotenv import load_dotenv
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime, date
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
+
+from db_control import crud, mymodels
+from db_control.create_tables import init_db
+from db_control.crud import SessionLocal
+
+# schemas.pyから必要なモデルをimport
+from schemas import LoginRequest, LoginResponse, ResetPasswordRequest, MessageResponse
+
+# アプリケーション初期化時にテーブルを作成
+init_db()
 
 # === 環境変数とデータベース設定 ===
 load_dotenv()
@@ -51,6 +62,13 @@ except Exception as e:
     raise e
 
 # === Pydantic モデル ===
+
+class UserProfileResponse(BaseModel):
+    user_id: str
+    name: str
+    organization_id: int
+    organization_name: str
+    
 class LoginRequest(BaseModel):
     user_id: str
     password: str
@@ -148,6 +166,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# 環境変数の読み込み
+load_dotenv()
+
+# OpenAIクライアントの初期化
+client = OpenAI(
+    api_key=os.getenv("OPENAI_API_KEY")
+)
+
 # === データベースセッション ===
 def get_db():
     db = SessionLocal()
@@ -193,6 +219,28 @@ async def login(request: LoginRequest, db: Session = Depends(get_db)):
             email=user.email,
             organization_id=user.organization_id or 0,
             organization_name=user.organization_name or ""
+        )
+    
+        # パスワード検証
+        if user.password != request.password:
+            raise HTTPException(
+                status_code=401, 
+                detail="ユーザーIDまたはパスワードが正しくありません"
+            )
+        
+        # 組織情報を取得
+        organization = None
+        if user.organization_id:
+            organization = db.query(mymodels.Organization).filter(
+                mymodels.Organization.organization_id == user.organization_id
+            ).first()
+        
+        return LoginResponse(
+            user_id=user.user_id,
+            name=user.name,
+            email=user.email,
+            organization_id=user.organization_id or 0,
+            organization_name=organization.organization_name if organization else ""
         )
     
     except HTTPException:
@@ -293,6 +341,85 @@ async def validate_token(user_id: str, db: Session = Depends(get_db)):
             status_code=500, 
             detail=f"トークン検証中にエラーが発生しました: {str(e)}"
         )
+
+# === その他のエンドポイント（既存のものを保持） ===
+
+@app.get("/usr_profile", response_model=UserProfileResponse)
+async def get_usr_profile(user_id: str = Query(...)):
+    """ユーザープロファイル取得API"""
+    try:
+        user = crud.get_user_by_id(user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        organization = crud.get_organization_by_id(user.organization_id)
+        organization_name = organization.organization_name if organization else ""
+        
+        return UserProfileResponse(
+            user_id=user.user_id,
+            name=user.name,
+            organization_id=user.organization_id or 0,
+            organization_name=organization_name
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/meeting_list", response_model=List[MeetingListItem])
+async def get_meeting_list(
+    user_id: str = Query(...),
+    start_datetime: Optional[str] = Query(None),
+    end_datetime: Optional[str] = Query(None),
+    organization_id: Optional[int] = Query(None),
+    meeting_type: Optional[str] = Query(None)
+):
+    """会議一覧取得API"""
+    try:
+        meeting_details = crud.get_meetings_by_user_with_details(
+            user_id=user_id,
+            start_datetime=start_datetime,
+            end_datetime=end_datetime,
+            organization_id=organization_id,
+            meeting_type=meeting_type
+        )
+        
+        meeting_list = []
+        for meeting, creator_name, creator_organization_name, role_type in meeting_details:
+            meeting_item = MeetingListItem(
+                meeting_id=meeting.meeting_id,
+                title=meeting.title,
+                meeting_type=meeting.meeting_type,
+                meeting_mode=meeting.meeting_mode,
+                date_time=meeting.date_time.strftime("%Y-%m-%dT%H:%M:00"),
+                name=creator_name or "",
+                organization_name=creator_organization_name or "",
+                role_type=role_type
+            )
+            meeting_list.append(meeting_item)
+        
+        return meeting_list
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/meeting", response_model=MeetingCreateResponse)
+async def create_meeting(meeting: MeetingCreate):
+    """会議情報登録API"""
+    try:
+        if 'T' in meeting.date_time:
+            date_time = datetime.fromisoformat(meeting.date_time.replace('Z', '+00:00'))
+        else:
+            date_time = datetime.strptime(meeting.date_time, "%Y/%m/%d %H:%M")
+        
+        meeting_id = crud.create_meeting(
+            title=meeting.title,
+            meeting_type=meeting.meeting_type,
+            meeting_mode=meeting.meeting_mode,
+            date_time=date_time,
+            created_by=meeting.created_by
+        )
+        
+        return MeetingCreateResponse(meeting_id=meeting_id, status="success")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 # === デバッグ用エンドポイント ===
 
