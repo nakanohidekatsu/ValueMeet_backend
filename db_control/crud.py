@@ -1,5 +1,4 @@
 # crud.py
-# uname() error回避
 import platform
 print("platform", platform.uname())
 
@@ -10,6 +9,9 @@ from sqlalchemy.orm import sessionmaker, Session
 import json
 import pandas as pd
 import psycopg2
+from psycopg2.extras import RealDictCursor
+from urllib.parse import urlparse
+
 from datetime import datetime, date
 from typing import List, Optional
 import os
@@ -44,6 +46,78 @@ SSL_CERT_PATH = os.getenv("SSL_CERT_PATH")
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
+# データベース接続の設定
+def get_database_config():
+    """環境変数からデータベース設定を取得"""
+    database_url = os.getenv("DATABASE_URL")
+    
+    if not database_url:
+        raise ValueError("DATABASE_URL環境変数が設定されていません")
+    
+    return database_url
+
+# SQLAlchemy設定
+DATABASE_URL = get_database_config()
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+
+def get_db_connection():
+    """psycopg2用のデータベース接続を取得（修正版）"""
+    try:
+        # SQLAlchemy形式のDSN文字列をpsycopg2形式に変換
+        database_url = get_database_config()
+        
+        # postgresql+psycopg2:// を postgresql:// に変換
+        if database_url.startswith("postgresql+psycopg2://"):
+            database_url = database_url.replace("postgresql+psycopg2://", "postgresql://")
+        
+        # URLを解析
+        parsed = urlparse(database_url)
+        
+        # psycopg2用の接続パラメータを構築
+        conn_params = {
+            'host': parsed.hostname,
+            'port': parsed.port or 5432,
+            'database': parsed.path[1:],  # 先頭の'/'を除去
+            'user': parsed.username,
+            'password': parsed.password
+        }
+        
+        # 接続テスト
+        conn = psycopg2.connect(**conn_params)
+        return conn
+        
+    except Exception as e:
+        # Fallback: 環境変数から直接接続パラメータを取得
+        try:
+            conn = psycopg2.connect(
+                host=os.getenv("DB_HOST", "aws-0-ap-northeast-1.pooler.supabase.com"),
+                port=int(os.getenv("DB_PORT", "6543")),
+                database=os.getenv("DB_NAME", "postgres"),
+                user=os.getenv("DB_USER", "postgres.zdzdymwaessgxeojmtpb"),
+                password=os.getenv("DB_PASSWORD", "ValueMeet2025"),
+                sslmode='require'  # Supabaseは通常SSL必須
+            )
+            return conn
+        except Exception as fallback_error:
+            raise Exception(f"データベース接続エラー: {str(fallback_error)}")
+
+# または、環境変数を個別に設定する場合の代替案
+def get_db_connection_alternative():
+    """環境変数から個別にデータベース接続パラメータを取得する方法"""
+    try:
+        conn = psycopg2.connect(
+            host=os.getenv("DB_HOST", "aws-0-ap-northeast-1.pooler.supabase.com"),
+            port=os.getenv("DB_PORT", "6543"),
+            database=os.getenv("DB_NAME", "postgres"),
+            user=os.getenv("DB_USER", "postgres.zdzdymwaessgxeojmtpb"),
+            password=os.getenv("DB_PASSWORD", "ValueMeet2025")
+        )
+        return conn
+    except Exception as e:
+        raise Exception(f"データベース接続エラー: {str(e)}")
+    
 def get_db():
     """データベースセッションを取得"""
     db = SessionLocal()
@@ -67,12 +141,15 @@ def hash_password(password: str) -> str:
 
 # === User関連 ===
 
-def get_user_by_id(user_id: str) -> Optional[mymodels.User]:
-    """ユーザーIDでユーザー情報を取得"""
-    with SessionLocal() as db:
-        return db.execute(
-            select(mymodels.User).where(mymodels.User.user_id == user_id)
-        ).scalar_one_or_none()
+def get_user_by_id(user_id: str):
+    """SQLAlchemyセッションを使用してユーザーを取得"""
+    db = SessionLocal()
+    try:
+        from . import mymodels
+        user = db.query(mymodels.User).filter(mymodels.User.user_id == user_id).first()
+        return user
+    finally:
+        db.close()
 
 def search_users_by_name(name: str) -> List[mymodels.User]:
     """名前で部分一致検索"""
@@ -83,14 +160,18 @@ def search_users_by_name(name: str) -> List[mymodels.User]:
 
 # === Organization関連 ===
 
-def get_organization_by_id(organization_id: int) -> Optional[mymodels.Organization]:
-    if organization_id is None:
+def get_organization_by_id(organization_id: int):
+    """SQLAlchemyセッションを使用して組織を取得"""
+    if not organization_id:
         return None
-    with SessionLocal() as db:
-        return db.execute(
-            select(mymodels.Organization)
-            .where(mymodels.Organization.organization_id == organization_id)
-        ).scalar_one_or_none()
+    
+    db = SessionLocal()
+    try:
+        from . import mymodels
+        org = db.query(mymodels.Organization).filter(mymodels.Organization.organization_id == organization_id).first()
+        return org
+    finally:
+        db.close()
 
 # === Meeting関連 ===
 
@@ -483,8 +564,31 @@ def create_sample_data():
             db.add_all(users)
             db.commit()
 
+# テスト用のデータベース接続確認
+def test_db_connection():
+    """データベース接続をテストする"""
+    try:
+        # SQLAlchemy接続テスト
+        db = SessionLocal()
+        result = db.execute(text("SELECT 1"))
+        db.close()
+        print("✅ SQLAlchemy接続成功")
+        
+        # psycopg2接続テスト
+        conn = get_db_connection()
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1")
+            result = cur.fetchone()
+        conn.close()
+        print("✅ psycopg2接続成功")
+        
+        return True
+    except Exception as e:
+        print(f"❌ データベース接続エラー: {e}")
+        return False
+
 if __name__ == "__main__":
-    # テスト用
-    create_sample_data()
-    print("Sample data created successfully")
+    test_db_connection()
+    
+
     
