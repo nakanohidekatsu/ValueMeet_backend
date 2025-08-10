@@ -1,12 +1,13 @@
 # app.py - 超シンプル修正版（認証機能重点）
 
-from fastapi import FastAPI, Depends, HTTPException, Query
+from fastapi import FastAPI, Depends, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 import os
+import json
 from dotenv import load_dotenv
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, date
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
 
@@ -69,6 +70,72 @@ class ResetPasswordRequest(BaseModel):
     target_user_id: str
     new_password: str
 
+class DepartmentMember(BaseModel):
+    user_id: str
+    name: str
+    organization_name: str
+
+class MeetingListItem(BaseModel):
+    meeting_id: int
+    title: str
+    meeting_type: Optional[str]
+    meeting_mode: Optional[str]
+    date_time: str
+    name: str
+    organization_name: str
+    role_type: Optional[str]
+
+class MeetingCreate(BaseModel):
+    title: str
+    meeting_type: Optional[str]
+    meeting_mode: Optional[str]
+    date_time: str
+    created_by: str
+
+class MeetingCreateResponse(BaseModel):
+    meeting_id: int
+    status: str = "success"
+
+class AgendaCreate(BaseModel):
+    meeting_id: int
+    purpose: Optional[str] = None
+    topic: Optional[str] = None
+    purposes: Optional[List[str]] = None
+    topics: Optional[List[str]] = None
+
+class TagRegister(BaseModel):
+    meeting_id: int
+    tag: str
+
+class TagsRegisterBatch(BaseModel):
+    meeting_id: int
+    tags: List[str]
+
+class TagGenerateResponse(BaseModel):
+    tags: List[str]
+
+class RecommendUser(BaseModel):
+    organization_name: str
+    name: str
+    user_id: str
+    similarity_score: Optional[float] = None
+    past_role: Optional[str] = None
+
+class AttendCreate(BaseModel):
+    meeting_id: int
+    user_id: str
+    role_type: Optional[str] = "participant"
+
+class AttendCreateBatch(BaseModel):
+    meeting_id: int
+    participants: List[dict]
+
+class NameSearchResult(BaseModel):
+    organization_name: str
+    name: str
+    user_id: str
+    email: Optional[str] = None
+    
 # === FastAPI アプリケーション ===
 app = FastAPI(title="Meeting Management API - Simple Auth")
 
