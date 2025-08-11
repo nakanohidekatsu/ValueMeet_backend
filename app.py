@@ -187,6 +187,13 @@ class ParticipantResponse(BaseModel):
 # === FastAPI アプリケーション ===
 app = FastAPI(title="Meeting Management API - Simple Auth")
 
+# きょん：APIルーター用コード
+from api.todo import router as todo_router
+from api.evaluation import router as evaluation_router
+
+app.include_router(todo_router)
+app.include_router(evaluation_router)
+
 # CORS設定
 app.add_middleware(
     CORSMiddleware,
