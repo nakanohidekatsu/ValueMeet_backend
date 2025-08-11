@@ -643,12 +643,12 @@ async def get_department_meetings(
     meeting_type: Optional[str] = Query(None),
     db: Session = Depends(get_db)
 ):
-    """部内会議一覧取得API"""
+    """部内会議一覧取得API（参加者数計算修正版）"""
     try:
         # 組織に所属するユーザーが作成または参加した会議を取得
         query = text("""
             SELECT DISTINCT m.meeting_id, m.title, m.meeting_type, m.meeting_mode, 
-                   m.date_time, u.name, o.organization_name, p.role_type
+                   m.date_time, m.status, u.name, o.organization_name, p.role_type
             FROM meetings m
             LEFT JOIN users u ON m.created_by = u.user_id
             LEFT JOIN organizations o ON u.organization_id = o.organization_id
@@ -664,6 +664,13 @@ async def get_department_meetings(
         
         meeting_list = []
         for meeting in meetings:
+            # 実際の参加者数を計算
+            participant_count = crud.get_participant_count(db, meeting.meeting_id)
+            
+            # アジェンダから目的を取得
+            agenda = crud.get_agenda_by_meeting_id(meeting.meeting_id)
+            purpose = agenda.purpose if agenda else None
+            
             meeting_item = MeetingListItem(
                 meeting_id=meeting.meeting_id,
                 title=meeting.title,
@@ -672,7 +679,11 @@ async def get_department_meetings(
                 date_time=meeting.date_time.strftime("%Y-%m-%dT%H:%M:00"),
                 name=meeting.name or "",
                 organization_name=meeting.organization_name or "",
-                role_type=meeting.role_type
+                role_type=meeting.role_type,
+                purpose=purpose,
+                status=meeting.status if hasattr(meeting, 'status') and meeting.status else "scheduled",
+                # 修正: 実際の参加者数を設定
+                participants=participant_count
             )
             meeting_list.append(meeting_item)
         
@@ -684,6 +695,7 @@ async def get_department_meetings(
             detail=f"部内会議一覧取得中にエラーが発生しました: {str(e)}"
         )
 
+
 @app.get("/member_meetings", response_model=List[MeetingListItem])
 async def get_member_meetings(
     member_id: str = Query(...),
@@ -692,7 +704,7 @@ async def get_member_meetings(
     meeting_type: Optional[str] = Query(None),
     db: Session = Depends(get_db)
 ):
-    """担当者の会議一覧取得API"""
+    """担当者の会議一覧取得API（参加者数計算修正版）"""
     try:
         meeting_details = crud.get_meetings_by_user_with_details(
             user_id=member_id,
@@ -703,6 +715,13 @@ async def get_member_meetings(
         
         meeting_list = []
         for meeting, creator_name, creator_organization_name, role_type in meeting_details:
+            # 実際の参加者数を計算
+            participant_count = crud.get_participant_count(db, meeting.meeting_id)
+            
+            # アジェンダから目的を取得
+            agenda = crud.get_agenda_by_meeting_id(meeting.meeting_id)
+            purpose = agenda.purpose if agenda else None
+            
             meeting_item = MeetingListItem(
                 meeting_id=meeting.meeting_id,
                 title=meeting.title,
@@ -711,7 +730,11 @@ async def get_member_meetings(
                 date_time=meeting.date_time.strftime("%Y-%m-%dT%H:%M:00"),
                 name=creator_name or "",
                 organization_name=creator_organization_name or "",
-                role_type=role_type
+                role_type=role_type,
+                purpose=purpose,
+                status=meeting.status if hasattr(meeting, 'status') and meeting.status else "scheduled",
+                # 修正: 実際の参加者数を設定
+                participants=participant_count
             )
             meeting_list.append(meeting_item)
         
@@ -1113,6 +1136,36 @@ async def debug_user_check(user_id: str = "A000001", db: Session = Depends(get_d
             detail=f"User check failed: {str(e)}"
         )
 
+@app.get("/debug/meeting/{meeting_id}/participant-count")
+async def debug_get_participant_count(meeting_id: int, db: Session = Depends(get_db)):
+    """デバッグ用: 特定会議の参加者数と詳細を確認"""
+    try:
+        # 参加者数を取得
+        participant_count = crud.get_participant_count(db, meeting_id)
+        
+        # 参加者の詳細を取得
+        participant_details = crud.get_participant_details_by_meeting_id(meeting_id, db)
+        
+        return {
+            "meeting_id": meeting_id,
+            "participant_count": participant_count,
+            "participants": [
+                {
+                    "user_id": p.user_id,
+                    "name": p.name,
+                    "organization_name": p.organization_name or "",
+                    "role_type": p.role_type
+                }
+                for p in participant_details
+            ]
+        }
+    
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, 
+            detail=f"参加者情報取得エラー: {str(e)}"
+        )
+        
 @app.get("/health")
 async def health_check():
     """ヘルスチェック"""
