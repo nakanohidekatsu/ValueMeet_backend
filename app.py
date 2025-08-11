@@ -102,7 +102,8 @@ class MeetingListItem(BaseModel):
     name: str
     organization_name: str
     role_type: Optional[str]
-
+    purpose: Optional[str] = None
+    
 class MeetingCreate(BaseModel):
     title: str
     meeting_type: Optional[str]
@@ -384,6 +385,8 @@ async def get_meeting_list(
         
         meeting_list = []
         for meeting, creator_name, creator_organization_name, role_type in meeting_details:
+            agenda = crud.get_agenda_by_meeting_id(meeting.meeting_id)
+            purpose = agenda.purpose if agenda else None
             meeting_item = MeetingListItem(
                 meeting_id=meeting.meeting_id,
                 title=meeting.title,
@@ -392,7 +395,8 @@ async def get_meeting_list(
                 date_time=meeting.date_time.strftime("%Y-%m-%dT%H:%M:00"),
                 name=creator_name or "",
                 organization_name=creator_organization_name or "",
-                role_type=role_type
+                role_type=role_type,
+                purpose=purpose
             )
             meeting_list.append(meeting_item)
         

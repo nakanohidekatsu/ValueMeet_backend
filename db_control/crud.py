@@ -352,6 +352,16 @@ def get_participant_role(meeting_id: int, user_id: str) -> Optional[mymodels.Par
             )
         ).scalar_one_or_none()
 
+def get_agenda_by_meeting_id(meeting_id: int):
+    """会議IDからアジェンダを取得"""
+    db = SessionLocal()
+    try:
+        agenda = db.query(mymodels.Agenda).filter(
+            mymodels.Agenda.meeting_id == meeting_id
+        ).first()
+        return agenda
+    finally:
+        db.close()
 
 def get_users_by_meeting_ids(
     db: Session,
