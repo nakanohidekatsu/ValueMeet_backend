@@ -103,7 +103,7 @@ class MeetingListItem(BaseModel):
     organization_name: str
     role_type: Optional[str]
     purpose: Optional[str] = None
-    status: Optional[str] = "scheduled"
+    status: Optional[str] = "draft"
     
 class MeetingCreate(BaseModel):
     title: str
