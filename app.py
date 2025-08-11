@@ -8,7 +8,7 @@ import json
 from openai import OpenAI
 from dotenv import load_dotenv
 from typing import Optional, List
-from datetime import datetime, date
+from datetime import datetime, date, time
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
 
@@ -106,10 +106,14 @@ class MeetingListItem(BaseModel):
     
 class MeetingCreate(BaseModel):
     title: str
-    meeting_type: Optional[str]
-    meeting_mode: Optional[str]
+    description: Optional[str] = None  # 会議概要を追加
+    meeting_type: Optional[str] = None
+    meeting_mode: Optional[str] = None
+    priority: Optional[str] = None  # 優先度を追加
     date_time: str
+    end_time: Optional[str] = None  # 終了時間を追加
     created_by: str
+    status: Optional[str] = "draft"  # ステータスを追加
 
 class MeetingCreateResponse(BaseModel):
     meeting_id: int
@@ -247,28 +251,6 @@ async def login(request: LoginRequest, db: Session = Depends(get_db)):
             organization_name=user.organization_name or ""
         )
     
-        # パスワード検証
-        if user.password != request.password:
-            raise HTTPException(
-                status_code=401, 
-                detail="ユーザーIDまたはパスワードが正しくありません"
-            )
-        
-        # 組織情報を取得
-        organization = None
-        if user.organization_id:
-            organization = db.query(mymodels.Organization).filter(
-                mymodels.Organization.organization_id == user.organization_id
-            ).first()
-        
-        return LoginResponse(
-            user_id=user.user_id,
-            name=user.name,
-            email=user.email,
-            organization_id=user.organization_id or 0,
-            organization_name=organization.organization_name if organization else ""
-        )
-    
     except HTTPException:
         raise
     except Exception as e:
@@ -368,7 +350,105 @@ async def validate_token(user_id: str, db: Session = Depends(get_db)):
             detail=f"トークン検証中にエラーが発生しました: {str(e)}"
         )
 
-# === その他のエンドポイント（既存のものを保持） ===
+# === 会議管理エンドポイント ===
+
+@app.post("/meeting", response_model=MeetingCreateResponse)
+async def create_meeting(meeting: MeetingCreate, db: Session = Depends(get_db)):
+    """会議情報登録API（拡張版）"""
+    try:
+        # 日時の処理
+        if 'T' in meeting.date_time:
+            date_time = datetime.fromisoformat(meeting.date_time.replace('Z', '+00:00'))
+        else:
+            date_time = datetime.strptime(meeting.date_time, "%Y/%m/%d %H:%M")
+        
+        # 終了時間の処理
+        end_time = None
+        if meeting.end_time:
+            # HH:MM形式の文字列をtime型に変換
+            try:
+                time_parts = meeting.end_time.split(':')
+                end_time = time(int(time_parts[0]), int(time_parts[1]))
+            except (ValueError, IndexError):
+                raise HTTPException(status_code=400, detail="終了時間の形式が正しくありません (HH:MM)")
+
+        # SQLを直接使用して会議を作成（新しいフィールドを含む）
+        insert_query = text("""
+            INSERT INTO meetings (
+                title, description, meeting_type, meeting_mode, priority,
+                date_time, end_time, created_by, status, created_at
+            ) VALUES (
+                :title, :description, :meeting_type, :meeting_mode, :priority,
+                :date_time, :end_time, :created_by, :status, :created_at
+            ) RETURNING meeting_id
+        """)
+        
+        result = db.execute(insert_query, {
+            "title": meeting.title,
+            "description": meeting.description,
+            "meeting_type": meeting.meeting_type,
+            "meeting_mode": meeting.meeting_mode,
+            "priority": meeting.priority,
+            "date_time": date_time,
+            "end_time": end_time,
+            "created_by": meeting.created_by,
+            "status": meeting.status or "draft",
+            "created_at": datetime.now()
+        })
+        
+        meeting_id = result.fetchone()[0]
+        db.commit()
+        
+        return MeetingCreateResponse(meeting_id=meeting_id, status="success")
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"会議作成に失敗しました: {str(e)}")
+
+@app.get("/meeting/{meeting_id}", response_model=MeetingDetailResponse)
+async def get_meeting_detail(meeting_id: int, db: Session = Depends(get_db)):
+    """
+    会議詳細取得API
+    指定されたIDの会議の詳細情報を取得
+    """
+    try:
+        # 会議情報を取得
+        query = text("""
+            SELECT meeting_id, title, description, meeting_type, meeting_mode, 
+                   priority, date_time, end_time, created_by, status
+            FROM meetings 
+            WHERE meeting_id = :meeting_id
+        """)
+        
+        result = db.execute(query, {"meeting_id": meeting_id})
+        meeting = result.fetchone()
+        
+        if not meeting:
+            raise HTTPException(status_code=404, detail="Meeting not found")
+        
+        return MeetingDetailResponse(
+            meeting_id=meeting.meeting_id,
+            title=meeting.title,
+            description=meeting.description,
+            meeting_type=meeting.meeting_type,
+            meeting_mode=meeting.meeting_mode,
+            priority=meeting.priority,
+            date_time=meeting.date_time.strftime("%Y-%m-%dT%H:%M:00"),
+            end_time=meeting.end_time.strftime("%H:%M") if meeting.end_time else None,
+            created_by=meeting.created_by,
+            status=meeting.status
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, 
+            detail=f"会議詳細取得中にエラーが発生しました: {str(e)}"
+        )
+
 @app.get("/meeting/{meeting_id}/participants", response_model=List[ParticipantResponse])
 async def get_meeting_participants(meeting_id: int, db: Session = Depends(get_db)):
     """
@@ -438,7 +518,9 @@ async def get_meeting_agenda(meeting_id: int, db: Session = Depends(get_db)):
             status_code=500, 
             detail=f"アジェンダ取得中にエラーが発生しました: {str(e)}"
         )
-        
+
+# === その他既存エンドポイント ===
+
 @app.get("/usr_profile", response_model=UserProfileResponse)
 async def get_usr_profile(user_id: str = Query(...)):
     """ユーザープロファイル取得API"""
@@ -497,71 +579,6 @@ async def get_meeting_list(
         return meeting_list
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/meeting", response_model=MeetingCreateResponse)
-async def create_meeting(meeting: MeetingCreate):
-    """会議情報登録API"""
-    try:
-        if 'T' in meeting.date_time:
-            date_time = datetime.fromisoformat(meeting.date_time.replace('Z', '+00:00'))
-        else:
-            date_time = datetime.strptime(meeting.date_time, "%Y/%m/%d %H:%M")
-        
-        meeting_id = crud.create_meeting(
-            title=meeting.title,
-            meeting_type=meeting.meeting_type,
-            meeting_mode=meeting.meeting_mode,
-            date_time=date_time,
-            created_by=meeting.created_by
-        )
-        
-        return MeetingCreateResponse(meeting_id=meeting_id, status="success")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/meeting/{meeting_id}", response_model=MeetingDetailResponse)
-async def get_meeting_detail(meeting_id: int, db: Session = Depends(get_db)):
-    """
-    会議詳細取得API
-    指定されたIDの会議の詳細情報を取得
-    """
-    try:
-        # 会議情報を取得
-        query = text("""
-            SELECT meeting_id, title, description, meeting_type, meeting_mode, 
-                   priority, date_time, end_time, created_by, status
-            FROM meetings 
-            WHERE meeting_id = :meeting_id
-        """)
-        
-        result = db.execute(query, {"meeting_id": meeting_id})
-        meeting = result.fetchone()
-        
-        if not meeting:
-            raise HTTPException(status_code=404, detail="Meeting not found")
-        
-        return MeetingDetailResponse(
-            meeting_id=meeting.meeting_id,
-            title=meeting.title,
-            description=meeting.description,
-            meeting_type=meeting.meeting_type,
-            meeting_mode=meeting.meeting_mode,
-            priority=meeting.priority,
-            date_time=meeting.date_time.strftime("%Y-%m-%dT%H:%M:00"),
-            end_time=meeting.end_time.strftime("%H:%M") if meeting.end_time else None,
-            created_by=meeting.created_by,
-            status=meeting.status
-        )
-    
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, 
-            detail=f"会議詳細取得中にエラーが発生しました: {str(e)}"
-        )
-        
-# app.pyに追加すべきエンドポイント
 
 @app.get("/department_members", response_model=List[DepartmentMember])
 async def get_department_members(
@@ -684,8 +701,8 @@ async def get_member_meetings(
             status_code=500, 
             detail=f"担当者会議一覧取得中にエラーが発生しました: {str(e)}"
         )
-        
-        # 1. アジェンダ登録APIの修正（配列対応）
+
+# 1. アジェンダ登録APIの修正（配列対応）
 @app.post("/agenda")
 async def create_agenda(agenda: AgendaCreate):
     """
@@ -966,7 +983,26 @@ async def search_by_name(name: str = Query(..., description="検索する名前�
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# === デバッグ用エンドポイント（開発環境のみ） ===
+@app.delete("/meeting/{meeting_id}")
+async def delete_meeting(meeting_id: int):
+    """
+    会議削除API
+    指定された会議を削除する
+    """
+    try:
+        # 会議の存在確認
+        meeting = crud.get_meeting_by_id(meeting_id)
+        if not meeting:
+            raise HTTPException(status_code=404, detail="Meeting not found")
+        
+        # 関連データの削除
+        crud.delete_meeting_and_related_data(meeting_id)
+        
+        return {"status": "success", "message": "Meeting deleted successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# === デバッグ用エンドポイント ===
 
 @app.get("/debug/meetings")
 async def debug_get_all_meetings():
@@ -995,130 +1031,6 @@ async def debug_get_meeting_tags(meeting_id: int):
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         db.close()
-        
-@app.get("/department_meetings", response_model=List[MeetingListItem])
-async def get_department_meetings(
-    organization_id: int = Query(..., description="組織ID"),
-    start_datetime: Optional[str] = Query(None),
-    end_datetime: Optional[str] = Query(None),
-    meeting_type: Optional[str] = Query(None)
-):
-    """
-    部内会議一覧取得API
-    指定された組織の全ての会議を取得
-    """
-    try:
-        meeting_details = crud.get_meetings_by_organization_with_details(
-            organization_id=organization_id,
-            start_datetime=start_datetime,
-            end_datetime=end_datetime,
-            meeting_type=meeting_type
-        )
-        
-        meeting_list = []
-        for meeting, creator_name, creator_organization_name, role_type in meeting_details:
-            meeting_item = MeetingListItem(
-                meeting_id=meeting.meeting_id,
-                title=meeting.title,
-                meeting_type=meeting.meeting_type,
-                meeting_mode=meeting.meeting_mode,
-                date_time=meeting.date_time.strftime("%Y-%m-%dT%H:%M:00"),
-                name=creator_name or "",
-                organization_name=creator_organization_name or "",
-                role_type=role_type
-            )
-            meeting_list.append(meeting_item)
-        
-        return meeting_list
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/member_meetings", response_model=List[MeetingListItem])
-async def get_member_meetings(
-    member_id: str = Query(..., description="メンバーのユーザーID"),
-    start_datetime: Optional[str] = Query(None),
-    end_datetime: Optional[str] = Query(None),
-    meeting_type: Optional[str] = Query(None)
-):
-    """
-    指定メンバーの会議一覧取得API
-    指定されたメンバーが作成または参加する会議の一覧を取得
-    """
-    try:
-        meeting_details = crud.get_meetings_by_user_with_details(
-            user_id=member_id,
-            start_datetime=start_datetime,
-            end_datetime=end_datetime,
-            meeting_type=meeting_type
-        )
-        
-        meeting_list = []
-        for meeting, creator_name, creator_organization_name, role_type in meeting_details:
-            meeting_item = MeetingListItem(
-                meeting_id=meeting.meeting_id,
-                title=meeting.title,
-                meeting_type=meeting.meeting_type,
-                meeting_mode=meeting.meeting_mode,
-                date_time=meeting.date_time.strftime("%Y-%m-%dT%H:%M:00"),
-                name=creator_name or "",
-                organization_name=creator_organization_name or "",
-                role_type=role_type
-            )
-            meeting_list.append(meeting_item)
-        
-        return meeting_list
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/department_members", response_model=List[DepartmentMember])
-async def get_department_members(
-    organization_id: int = Query(..., description="組織ID")
-):
-    """
-    部内メンバー一覧取得API
-    指定された組織に所属するメンバーの一覧を取得
-    """
-    try:
-        members = crud.get_users_by_organization(organization_id)
-        
-        member_list = []
-        for user in members:
-            organization = crud.get_organization_by_id(user.organization_id)
-            
-            member = DepartmentMember(
-                user_id=user.user_id,
-                name=user.name,
-                organization_name=organization.organization_name if organization else ""
-            )
-            member_list.append(member)
-        
-        # 名前でソート
-        member_list.sort(key=lambda x: x.name)
-        
-        return member_list
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.delete("/meeting/{meeting_id}")
-async def delete_meeting(meeting_id: int):
-    """
-    会議削除API
-    指定された会議を削除する
-    """
-    try:
-        # 会議の存在確認
-        meeting = crud.get_meeting_by_id(meeting_id)
-        if not meeting:
-            raise HTTPException(status_code=404, detail="Meeting not found")
-        
-        # 関連データの削除
-        crud.delete_meeting_and_related_data(meeting_id)
-        
-        return {"status": "success", "message": "Meeting deleted successfully"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-# === デバッグ用エンドポイント ===
 
 @app.get("/debug/db-test")
 async def debug_database_connection(db: Session = Depends(get_db)):
@@ -1133,7 +1045,7 @@ async def debug_database_connection(db: Session = Depends(get_db)):
             SELECT table_name 
             FROM information_schema.tables 
             WHERE table_schema = 'public' 
-            AND table_name IN ('users', 'organizations')
+            AND table_name IN ('users', 'organizations', 'meetings')
         """))
         tables = [row[0] for row in table_check.fetchall()]
         
@@ -1194,11 +1106,21 @@ async def root():
     """ルートエンドポイント"""
     return {
         "message": "Meeting Management API", 
-        "version": "1.0-simple",
+        "version": "1.1-enhanced",
+        "new_features": [
+            "会議概要 (description)",
+            "優先度 (priority)", 
+            "終了時間 (end_time)",
+            "ステータス (status)"
+        ],
         "endpoints": [
             "/auth/login",
             "/auth/reset-password", 
             "/auth/validate-token",
+            "/meeting (POST) - Enhanced",
+            "/meeting/{meeting_id} (GET)",
+            "/meeting/{meeting_id}/agenda (GET)",
+            "/meeting/{meeting_id}/participants (GET)",
             "/debug/db-test",
             "/debug/user-check",
             "/health"
@@ -1208,4 +1130,3 @@ async def root():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
-    
