@@ -576,7 +576,18 @@ def delete_meeting_and_related_data(meeting_id: int):
             # エラー時はロールバック
             db.rollback()
             raise e
-    
+
+def get_participant_count(db: Session, meeting_id: int) -> int:
+    """指定された会議の参加者数を取得"""
+    try:
+        from sqlalchemy import select, func
+        count = db.execute(
+            select(func.count(mymodels.Participant.participant_id))
+            .where(mymodels.Participant.meeting_id == meeting_id)
+        ).scalar()
+        return count if count is not None else 0
+    except Exception as e:
+        print(f"参加者数取得エラー: {e}")
 
 # === データベース初期化用の関数 ===
 

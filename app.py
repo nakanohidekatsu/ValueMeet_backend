@@ -583,6 +583,7 @@ async def get_meeting_list(
         
         meeting_list = []
         for meeting, creator_name, creator_organization_name, role_type in meeting_details:
+            participant_count = crud.get_participant_count(db, meeting.meeting_id)
             agenda = crud.get_agenda_by_meeting_id(meeting.meeting_id)
             purpose = agenda.purpose if agenda else None
             meeting_item = MeetingListItem(
