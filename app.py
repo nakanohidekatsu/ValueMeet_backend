@@ -155,6 +155,31 @@ class NameSearchResult(BaseModel):
     user_id: str
     email: Optional[str] = None
     
+class MeetingDetailResponse(BaseModel):
+    meeting_id: int
+    title: str
+    description: Optional[str] = None
+    meeting_type: Optional[str] = None
+    meeting_mode: Optional[str] = None
+    priority: Optional[str] = None
+    date_time: str
+    end_time: Optional[str] = None
+    created_by: str
+    status: Optional[str] = None
+
+class AgendaResponse(BaseModel):
+    agenda_id: int
+    meeting_id: int
+    purpose: Optional[str] = None
+    topic: Optional[str] = None
+
+class ParticipantResponse(BaseModel):
+    user_id: str
+    name: str
+    organization_name: str
+    role_type: str
+    email: Optional[str] = None
+
 # === FastAPI アプリケーション ===
 app = FastAPI(title="Meeting Management API - Simple Auth")
 
@@ -344,7 +369,76 @@ async def validate_token(user_id: str, db: Session = Depends(get_db)):
         )
 
 # === その他のエンドポイント（既存のものを保持） ===
-
+@app.get("/meeting/{meeting_id}/participants", response_model=List[ParticipantResponse])
+async def get_meeting_participants(meeting_id: int, db: Session = Depends(get_db)):
+    """
+    参加者取得API
+    指定された会議の参加者一覧を取得
+    """
+    try:
+        query = text("""
+            SELECT p.user_id, u.name, o.organization_name, p.role_type, u.email
+            FROM participants p
+            LEFT JOIN users u ON p.user_id = u.user_id
+            LEFT JOIN organizations o ON u.organization_id = o.organization_id
+            WHERE p.meeting_id = :meeting_id
+            ORDER BY u.name
+        """)
+        
+        result = db.execute(query, {"meeting_id": meeting_id})
+        participants = result.fetchall()
+        
+        return [
+            ParticipantResponse(
+                user_id=p.user_id,
+                name=p.name,
+                organization_name=p.organization_name or "",
+                role_type=p.role_type,
+                email=p.email
+            )
+            for p in participants
+        ]
+    
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, 
+            detail=f"参加者取得中にエラーが発生しました: {str(e)}"
+        )
+        
+@app.get("/meeting/{meeting_id}/agenda", response_model=AgendaResponse)
+async def get_meeting_agenda(meeting_id: int, db: Session = Depends(get_db)):
+    """
+    アジェンダ取得API
+    指定された会議のアジェンダを取得
+    """
+    try:
+        query = text("""
+            SELECT agenda_id, meeting_id, purpose, topic
+            FROM agendas 
+            WHERE meeting_id = :meeting_id
+        """)
+        
+        result = db.execute(query, {"meeting_id": meeting_id})
+        agenda = result.fetchone()
+        
+        if not agenda:
+            raise HTTPException(status_code=404, detail="Agenda not found")
+        
+        return AgendaResponse(
+            agenda_id=agenda.agenda_id,
+            meeting_id=agenda.meeting_id,
+            purpose=agenda.purpose,
+            topic=agenda.topic
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, 
+            detail=f"アジェンダ取得中にエラーが発生しました: {str(e)}"
+        )
+        
 @app.get("/usr_profile", response_model=UserProfileResponse)
 async def get_usr_profile(user_id: str = Query(...)):
     """ユーザープロファイル取得API"""
@@ -425,6 +519,48 @@ async def create_meeting(meeting: MeetingCreate):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/meeting/{meeting_id}", response_model=MeetingDetailResponse)
+async def get_meeting_detail(meeting_id: int, db: Session = Depends(get_db)):
+    """
+    会議詳細取得API
+    指定されたIDの会議の詳細情報を取得
+    """
+    try:
+        # 会議情報を取得
+        query = text("""
+            SELECT meeting_id, title, description, meeting_type, meeting_mode, 
+                   priority, date_time, end_time, created_by, status
+            FROM meetings 
+            WHERE meeting_id = :meeting_id
+        """)
+        
+        result = db.execute(query, {"meeting_id": meeting_id})
+        meeting = result.fetchone()
+        
+        if not meeting:
+            raise HTTPException(status_code=404, detail="Meeting not found")
+        
+        return MeetingDetailResponse(
+            meeting_id=meeting.meeting_id,
+            title=meeting.title,
+            description=meeting.description,
+            meeting_type=meeting.meeting_type,
+            meeting_mode=meeting.meeting_mode,
+            priority=meeting.priority,
+            date_time=meeting.date_time.strftime("%Y-%m-%dT%H:%M:00"),
+            end_time=meeting.end_time.strftime("%H:%M") if meeting.end_time else None,
+            created_by=meeting.created_by,
+            status=meeting.status
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, 
+            detail=f"会議詳細取得中にエラーが発生しました: {str(e)}"
+        )
+        
 # app.pyに追加すべきエンドポイント
 
 @app.get("/department_members", response_model=List[DepartmentMember])
