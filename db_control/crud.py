@@ -487,6 +487,35 @@ def get_meetings_by_organization_with_details(
         
         return db.execute(query).all()
 
+def get_participant_count(db: Session, meeting_id: int) -> int:
+    """指定された会議の参加者数を取得"""
+    try:
+        count = db.execute(
+            select(func.count(mymodels.Participant.participant_id))
+            .where(mymodels.Participant.meeting_id == meeting_id)
+        ).scalar() or 0
+        return count
+    except Exception as e:
+        print(f"参加者数取得エラー: {e}")
+        return 0
+
+def get_participant_details_by_meeting_id(meeting_id: int, db: Session):
+    """指定された会議の参加者詳細を取得"""
+    try:
+        query = """
+            SELECT p.user_id, u.name, o.organization_name, p.role_type
+            FROM participants p
+            LEFT JOIN users u ON p.user_id = u.user_id
+            LEFT JOIN organizations o ON u.organization_id = o.organization_id
+            WHERE p.meeting_id = :meeting_id
+            ORDER BY u.name
+        """
+        result = db.execute(text(query), {"meeting_id": meeting_id})
+        return result.fetchall()
+    except Exception as e:
+        print(f"参加者詳細取得エラー: {e}")
+        return []
+    
 def get_meeting_by_id(meeting_id: int) -> Optional[mymodels.Meeting]:
     """会議IDで会議情報を取得"""
     with SessionLocal() as db:

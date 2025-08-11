@@ -104,6 +104,7 @@ class MeetingListItem(BaseModel):
     role_type: Optional[str]
     purpose: Optional[str] = None
     status: Optional[str] = "draft"
+    participants: int = 0
     
 class MeetingCreate(BaseModel):
     title: str
@@ -567,7 +568,8 @@ async def get_meeting_list(
     start_datetime: Optional[str] = Query(None),
     end_datetime: Optional[str] = Query(None),
     organization_id: Optional[int] = Query(None),
-    meeting_type: Optional[str] = Query(None)
+    meeting_type: Optional[str] = Query(None),
+    db: Session = Depends(get_db) 
 ):
     """会議一覧取得API"""
     try:
@@ -593,7 +595,8 @@ async def get_meeting_list(
                 organization_name=creator_organization_name or "",
                 role_type=role_type,
                 purpose=purpose,
-                status=meeting.status if hasattr(meeting, 'status') and meeting.status else "scheduled"
+                status=meeting.status if hasattr(meeting, 'status') and meeting.status else "scheduled",
+                participants=participant_count
             )
             meeting_list.append(meeting_item)
         
