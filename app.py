@@ -103,6 +103,7 @@ class MeetingListItem(BaseModel):
     organization_name: str
     role_type: Optional[str]
     purpose: Optional[str] = None
+    status: Optional[str] = "scheduled"
     
 class MeetingCreate(BaseModel):
     title: str
@@ -591,7 +592,8 @@ async def get_meeting_list(
                 name=creator_name or "",
                 organization_name=creator_organization_name or "",
                 role_type=role_type,
-                purpose=purpose
+                purpose=purpose,
+                status=meeting.status if hasattr(meeting, 'status') and meeting.status else "scheduled"
             )
             meeting_list.append(meeting_item)
         
