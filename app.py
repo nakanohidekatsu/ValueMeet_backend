@@ -200,9 +200,21 @@ app.add_middleware(
 load_dotenv()
 
 # OpenAIクライアントの初期化
-client = OpenAI(
-    api_key=os.getenv("OPENAI_API_KEY")
-)
+# client = OpenAI(
+#     api_key=os.getenv("OPENAI_API_KEY")
+# )
+
+# キー設定エラーバイパスのため
+import os
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+client = None
+if OPENAI_API_KEY:
+    from openai import OpenAI
+    client = OpenAI(api_key=OPENAI_API_KEY)
+else:
+    print("⚠ OPENAI_API_KEY が設定されていません。OpenAI連携機能は無効になります。")
 
 # === データベースセッション ===
 def get_db():
