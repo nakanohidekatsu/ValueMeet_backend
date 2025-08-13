@@ -1,7 +1,7 @@
 # mymodels.py
 
 from sqlalchemy import (
-    Integer, String, Text, DateTime, Date,
+    Integer, String, Text, DateTime, Date, Time, Boolean,
     ForeignKey
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -63,17 +63,32 @@ class Meeting(Base):
         String(200),
         nullable=False
     )
+    # 会議概要を追加
+    description: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True
+    )
     meeting_type: Mapped[Optional[str]] = mapped_column(
         String(50),
         nullable=True
     )
     meeting_mode: Mapped[Optional[str]] = mapped_column(
-        String(20),
+        String(50),  # 長さを50に拡張（ハイブリット会議対応）
+        nullable=True
+    )
+    # 優先度を追加
+    priority: Mapped[Optional[str]] = mapped_column(
+        String(10),
         nullable=True
     )
     date_time: Mapped[DateTime] = mapped_column(
         DateTime,
         nullable=False
+    )
+    # 終了時間を追加
+    end_time: Mapped[Optional[Time]] = mapped_column(
+        Time,
+        nullable=True
     )
     created_by: Mapped[Optional[str]] = mapped_column(
         String(36),
@@ -85,6 +100,17 @@ class Meeting(Base):
         String(20),
         nullable=True,
         default='scheduled'  # 'scheduled', 'draft', 'completed'
+    )
+    # 招集ルール違反フラグを追加
+    rule_violation: Mapped[Optional[bool]] = mapped_column(
+        Boolean,
+        nullable=True,
+        default=False
+    )
+    # 作成日時を追加
+    created_at: Mapped[Optional[DateTime]] = mapped_column(
+        DateTime,
+        nullable=True
     )
 
 class Agenda(Base):
@@ -150,8 +176,9 @@ class Participant(Base):
         ForeignKey('users.user_id'),
         nullable=True
     )
+    # 新しい役割体系に対応するためフィールド長を拡張
     role_type: Mapped[Optional[str]] = mapped_column(
-        String(36),
+        String(50),  # 36から50に拡張（「会議主催者」「実行責任者」等に対応）
         nullable=True
     )
 
@@ -301,4 +328,3 @@ class MeetingEvaluation(Base):
         nullable=True,
         default=lambda: __import__('datetime').datetime.utcnow()
     )
-    

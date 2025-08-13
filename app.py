@@ -99,12 +99,14 @@ class MeetingListItem(BaseModel):
     meeting_type: Optional[str]
     meeting_mode: Optional[str]
     date_time: str
+    end_time: Optional[str] = None  # 終了時間を追加
     name: str
     organization_name: str
     role_type: Optional[str]
     purpose: Optional[str] = None
     status: Optional[str] = "draft"
     participants: int = 0
+    rule_violation: Optional[bool] = False  # ルール違反フラグを追加
     
 class MeetingCreate(BaseModel):
     title: str
@@ -116,6 +118,7 @@ class MeetingCreate(BaseModel):
     end_time: Optional[str] = None  # 終了時間を追加
     created_by: str
     status: Optional[str] = "draft"  # ステータスを追加
+    rule_violation: Optional[bool] = False  # ルール違反フラグを追加
 
 class MeetingCreateResponse(BaseModel):
     meeting_id: int
@@ -172,6 +175,7 @@ class MeetingDetailResponse(BaseModel):
     end_time: Optional[str] = None
     created_by: str
     status: Optional[str] = None
+    rule_violation: Optional[bool] = False  # ルール違反フラグを追加
 
 class AgendaResponse(BaseModel):
     agenda_id: int
@@ -187,7 +191,7 @@ class ParticipantResponse(BaseModel):
     email: Optional[str] = None
 
 # === FastAPI アプリケーション ===
-app = FastAPI(title="Meeting Management API - Simple Auth")
+app = FastAPI(title="Meeting Management API - Enhanced")
 
 # きょん：APIルーター用コード
 from api.todo import router as todo_router
@@ -375,7 +379,7 @@ async def validate_token(user_id: str, db: Session = Depends(get_db)):
 
 @app.post("/meeting", response_model=MeetingCreateResponse)
 async def create_meeting(meeting: MeetingCreate, db: Session = Depends(get_db)):
-    """会議情報登録API（拡張版）"""
+    """会議情報登録API（拡張版・ルール違反対応）"""
     try:
         # 日時の処理
         if 'T' in meeting.date_time:
@@ -397,10 +401,10 @@ async def create_meeting(meeting: MeetingCreate, db: Session = Depends(get_db)):
         insert_query = text("""
             INSERT INTO meetings (
                 title, description, meeting_type, meeting_mode, priority,
-                date_time, end_time, created_by, status, created_at
+                date_time, end_time, created_by, status, rule_violation, created_at
             ) VALUES (
                 :title, :description, :meeting_type, :meeting_mode, :priority,
-                :date_time, :end_time, :created_by, :status, :created_at
+                :date_time, :end_time, :created_by, :status, :rule_violation, :created_at
             ) RETURNING meeting_id
         """)
         
@@ -414,6 +418,7 @@ async def create_meeting(meeting: MeetingCreate, db: Session = Depends(get_db)):
             "end_time": end_time,
             "created_by": meeting.created_by,
             "status": meeting.status or "draft",
+            "rule_violation": meeting.rule_violation or False,  # ルール違反フラグ
             "created_at": datetime.now()
         })
         
@@ -431,14 +436,14 @@ async def create_meeting(meeting: MeetingCreate, db: Session = Depends(get_db)):
 @app.get("/meeting/{meeting_id}", response_model=MeetingDetailResponse)
 async def get_meeting_detail(meeting_id: int, db: Session = Depends(get_db)):
     """
-    会議詳細取得API
+    会議詳細取得API（ルール違反フラグ対応）
     指定されたIDの会議の詳細情報を取得
     """
     try:
         # 会議情報を取得
         query = text("""
             SELECT meeting_id, title, description, meeting_type, meeting_mode, 
-                   priority, date_time, end_time, created_by, status
+                   priority, date_time, end_time, created_by, status, rule_violation
             FROM meetings 
             WHERE meeting_id = :meeting_id
         """)
@@ -459,7 +464,8 @@ async def get_meeting_detail(meeting_id: int, db: Session = Depends(get_db)):
             date_time=meeting.date_time.strftime("%Y-%m-%dT%H:%M:00"),
             end_time=meeting.end_time.strftime("%H:%M") if meeting.end_time else None,
             created_by=meeting.created_by,
-            status=meeting.status
+            status=meeting.status,
+            rule_violation=meeting.rule_violation or False
         )
     
     except HTTPException:
@@ -571,7 +577,7 @@ async def get_meeting_list(
     meeting_type: Optional[str] = Query(None),
     db: Session = Depends(get_db) 
 ):
-    """会議一覧取得API"""
+    """会議一覧取得API（ルール違反・終了時間対応）"""
     try:
         meeting_details = crud.get_meetings_by_user_with_details(
             user_id=user_id,
@@ -586,18 +592,21 @@ async def get_meeting_list(
             participant_count = crud.get_participant_count(db, meeting.meeting_id)
             agenda = crud.get_agenda_by_meeting_id(meeting.meeting_id)
             purpose = agenda.purpose if agenda else None
+            
             meeting_item = MeetingListItem(
                 meeting_id=meeting.meeting_id,
                 title=meeting.title,
                 meeting_type=meeting.meeting_type,
                 meeting_mode=meeting.meeting_mode,
                 date_time=meeting.date_time.strftime("%Y-%m-%dT%H:%M:00"),
+                end_time=meeting.end_time.strftime("%H:%M") if hasattr(meeting, 'end_time') and meeting.end_time else None,
                 name=creator_name or "",
                 organization_name=creator_organization_name or "",
                 role_type=role_type,
                 purpose=purpose,
                 status=meeting.status if hasattr(meeting, 'status') and meeting.status else "scheduled",
-                participants=participant_count
+                participants=participant_count,
+                rule_violation=getattr(meeting, 'rule_violation', False) or False
             )
             meeting_list.append(meeting_item)
         
@@ -647,12 +656,13 @@ async def get_department_meetings(
     meeting_type: Optional[str] = Query(None),
     db: Session = Depends(get_db)
 ):
-    """部内会議一覧取得API（参加者数計算修正版）"""
+    """部内会議一覧取得API（ルール違反・終了時間対応）"""
     try:
         # 組織に所属するユーザーが作成または参加した会議を取得
         query = text("""
             SELECT DISTINCT m.meeting_id, m.title, m.meeting_type, m.meeting_mode, 
-                   m.date_time, m.status, u.name, o.organization_name, p.role_type
+                   m.date_time, m.end_time, m.status, m.rule_violation, 
+                   u.name, o.organization_name, p.role_type
             FROM meetings m
             LEFT JOIN users u ON m.created_by = u.user_id
             LEFT JOIN organizations o ON u.organization_id = o.organization_id
@@ -681,13 +691,14 @@ async def get_department_meetings(
                 meeting_type=meeting.meeting_type,
                 meeting_mode=meeting.meeting_mode,
                 date_time=meeting.date_time.strftime("%Y-%m-%dT%H:%M:00"),
+                end_time=meeting.end_time.strftime("%H:%M") if meeting.end_time else None,
                 name=meeting.name or "",
                 organization_name=meeting.organization_name or "",
                 role_type=meeting.role_type,
                 purpose=purpose,
                 status=meeting.status if hasattr(meeting, 'status') and meeting.status else "scheduled",
-                # 修正: 実際の参加者数を設定
-                participants=participant_count
+                participants=participant_count,
+                rule_violation=getattr(meeting, 'rule_violation', False) or False
             )
             meeting_list.append(meeting_item)
         
@@ -699,7 +710,6 @@ async def get_department_meetings(
             detail=f"部内会議一覧取得中にエラーが発生しました: {str(e)}"
         )
 
-
 @app.get("/member_meetings", response_model=List[MeetingListItem])
 async def get_member_meetings(
     member_id: str = Query(...),
@@ -708,7 +718,7 @@ async def get_member_meetings(
     meeting_type: Optional[str] = Query(None),
     db: Session = Depends(get_db)
 ):
-    """担当者の会議一覧取得API（参加者数計算修正版）"""
+    """担当者の会議一覧取得API（ルール違反・終了時間対応）"""
     try:
         meeting_details = crud.get_meetings_by_user_with_details(
             user_id=member_id,
@@ -732,13 +742,14 @@ async def get_member_meetings(
                 meeting_type=meeting.meeting_type,
                 meeting_mode=meeting.meeting_mode,
                 date_time=meeting.date_time.strftime("%Y-%m-%dT%H:%M:00"),
+                end_time=meeting.end_time.strftime("%H:%M") if hasattr(meeting, 'end_time') and meeting.end_time else None,
                 name=creator_name or "",
                 organization_name=creator_organization_name or "",
                 role_type=role_type,
                 purpose=purpose,
                 status=meeting.status if hasattr(meeting, 'status') and meeting.status else "scheduled",
-                # 修正: 実際の参加者数を設定
-                participants=participant_count
+                participants=participant_count,
+                rule_violation=getattr(meeting, 'rule_violation', False) or False
             )
             meeting_list.append(meeting_item)
         
@@ -1184,18 +1195,20 @@ async def root():
     """ルートエンドポイント"""
     return {
         "message": "Meeting Management API", 
-        "version": "1.1-enhanced",
+        "version": "1.2-enhanced-with-rules",
         "new_features": [
             "会議概要 (description)",
             "優先度 (priority)", 
             "終了時間 (end_time)",
-            "ステータス (status)"
+            "ステータス (status)",
+            "招集ルール違反チェック (rule_violation)",
+            "会議コスト計算対応"
         ],
         "endpoints": [
             "/auth/login",
             "/auth/reset-password", 
             "/auth/validate-token",
-            "/meeting (POST) - Enhanced",
+            "/meeting (POST) - Enhanced with rules",
             "/meeting/{meeting_id} (GET)",
             "/meeting/{meeting_id}/agenda (GET)",
             "/meeting/{meeting_id}/participants (GET)",
