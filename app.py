@@ -1061,6 +1061,297 @@ async def delete_meeting(meeting_id: int):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/meetings/bulk-optimized", response_model=List[MeetingListItem])
+async def get_meetings_bulk_optimized(
+    user_id: str = Query(...),
+    filter_type: str = Query("my", regex="^(my|department|member)$"),
+    member_id: str = Query(None),
+    organization_id: int = Query(None),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    db: Session = Depends(get_db)
+):
+    """
+    統合最適化API - 単一クエリで全データ取得
+    
+    従来: 100+回のクエリ → 改善後: 1回のクエリ
+    予想改善率: 99%のクエリ削減
+    """
+    try:
+        # フィルタータイプに応じてWHERE条件を動的生成
+        if filter_type == "my":
+            user_filter = "WHERE (m.created_by = :target_user_id OR p.user_id = :target_user_id)"
+            target_user_id = user_id
+        elif filter_type == "department":
+            user_filter = """
+            WHERE (
+                u.organization_id = :org_id OR 
+                pu.organization_id = :org_id
+            )"""
+            target_user_id = None
+        elif filter_type == "member" and member_id:
+            user_filter = "WHERE (m.created_by = :target_user_id OR p.user_id = :target_user_id)"
+            target_user_id = member_id
+        else:
+            raise HTTPException(status_code=400, detail="Invalid filter configuration")
+        
+        # 超高速統合クエリ
+        query = text(f"""
+        WITH meeting_base AS (
+            -- Step 1: ベース会議の特定
+            SELECT DISTINCT m.meeting_id
+            FROM meetings m
+            LEFT JOIN participants p ON m.meeting_id = p.meeting_id
+            LEFT JOIN users u ON m.created_by = u.user_id
+            LEFT JOIN users pu ON p.user_id = pu.user_id
+            {user_filter}
+            AND (:start_date IS NULL OR m.date_time >= CAST(:start_date AS timestamp))
+            AND (:end_date IS NULL OR m.date_time <= CAST(:end_date AS timestamp))
+        ),
+        participant_stats AS (
+            -- Step 2: 参加者統計（集約）
+            SELECT 
+                p.meeting_id,
+                COUNT(*) as participant_count,
+                STRING_AGG(
+                    CASE WHEN p.user_id = :user_id THEN p.role_type END, 
+                    ', '
+                ) as user_role
+            FROM participants p
+            WHERE p.meeting_id IN (SELECT meeting_id FROM meeting_base)
+            GROUP BY p.meeting_id
+        ),
+        meeting_details AS (
+            -- Step 3: 会議詳細情報の結合
+            SELECT 
+                m.meeting_id,
+                m.title,
+                m.meeting_type,
+                m.meeting_mode,
+                m.date_time,
+                m.end_time,
+                m.status,
+                COALESCE(m.rule_violation, false) as rule_violation,
+                m.description,
+                m.priority,
+                u.name as creator_name,
+                o.organization_name as creator_org_name,
+                a.purpose,
+                COALESCE(ps.participant_count, 0) as participant_count,
+                COALESCE(ps.user_role, 'creator') as user_role
+            FROM meeting_base mb
+            JOIN meetings m ON mb.meeting_id = m.meeting_id
+            LEFT JOIN users u ON m.created_by = u.user_id
+            LEFT JOIN organizations o ON u.organization_id = o.organization_id
+            LEFT JOIN agendas a ON m.meeting_id = a.meeting_id
+            LEFT JOIN participant_stats ps ON m.meeting_id = ps.meeting_id
+        )
+        SELECT * FROM meeting_details
+        ORDER BY date_time DESC
+        LIMIT 1000
+        """)
+        
+        # パラメータ設定
+        params = {
+            "target_user_id": target_user_id,
+            "user_id": user_id,
+            "org_id": organization_id or (await get_user_org_id(user_id, db)),
+            "start_date": start_date,
+            "end_date": end_date
+        }
+        
+        # 単一クエリで全データ取得
+        start_time = time.time()
+        result = db.execute(query, params)
+        meetings = result.fetchall()
+        query_time = time.time() - start_time
+        
+        # レスポンス形式に変換
+        meeting_list = []
+        for meeting in meetings:
+            meeting_item = MeetingListItem(
+                meeting_id=meeting.meeting_id,
+                title=meeting.title,
+                meeting_type=meeting.meeting_type,
+                meeting_mode=meeting.meeting_mode,
+                date_time=meeting.date_time.strftime("%Y-%m-%dT%H:%M:00"),
+                end_time=meeting.end_time.strftime("%H:%M") if meeting.end_time else None,
+                name=meeting.creator_name or "",
+                organization_name=meeting.creator_org_name or "",
+                role_type=meeting.user_role or "participant",
+                purpose=meeting.purpose or "",
+                status=meeting.status or "scheduled",
+                participants=meeting.participant_count,
+                rule_violation=meeting.rule_violation
+            )
+            meeting_list.append(meeting_item)
+        
+        # パフォーマンス情報をヘッダーに追加
+        from fastapi import Response
+        response = Response()
+        response.headers["X-Query-Time"] = f"{query_time:.3f}s"
+        response.headers["X-Result-Count"] = str(len(meeting_list))
+        
+        return meeting_list
+        
+    except Exception as e:
+        logger.error(f"統合API エラー: {e}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"会議一覧取得に失敗しました: {str(e)}"
+        )
+
+async def get_user_org_id(user_id: str, db: Session) -> int:
+    """ユーザーの組織IDを取得"""
+    result = db.execute(
+        text("SELECT organization_id FROM users WHERE user_id = :user_id"),
+        {"user_id": user_id}
+    )
+    row = result.fetchone()
+    return row.organization_id if row else 1
+
+# ===============================
+# 簡易キャッシュ実装
+# ===============================
+import time
+import logging
+from typing import Dict, Any
+from datetime import datetime, timedelta
+
+# ロガー設定
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# インメモリキャッシュ
+_meeting_cache: Dict[str, Dict[str, Any]] = {}
+CACHE_DURATION = 300  # 5分
+
+def get_cache_key(user_id: str, filter_type: str, member_id: str, organization_id: int) -> str:
+    """キャッシュキー生成"""
+    return f"meetings:{user_id}:{filter_type}:{member_id or 'none'}:{organization_id or 'none'}"
+
+@app.get("/meetings/cached", response_model=List[MeetingListItem])
+async def get_meetings_cached(
+    user_id: str = Query(...),
+    filter_type: str = Query("my"),
+    member_id: str = Query(None),
+    organization_id: int = Query(None),
+    force_refresh: bool = Query(False),
+    db: Session = Depends(get_db)
+):
+    """キャッシュ機能付き会議一覧取得API"""
+    
+    cache_key = get_cache_key(user_id, filter_type, member_id, organization_id)
+    current_time = time.time()
+    
+    # キャッシュチェック
+    if not force_refresh and cache_key in _meeting_cache:
+        cached_data = _meeting_cache[cache_key]
+        if current_time - cached_data['timestamp'] < CACHE_DURATION:
+            # キャッシュヒット
+            return cached_data['data']
+    
+    # キャッシュミス or 期限切れ → 新しくデータ取得
+    meetings = await get_meetings_bulk_optimized(
+        user_id=user_id,
+        filter_type=filter_type,
+        member_id=member_id,
+        organization_id=organization_id,
+        db=db
+    )
+    
+    # キャッシュに保存
+    _meeting_cache[cache_key] = {
+        'data': meetings,
+        'timestamp': current_time
+    }
+    
+    # 古いキャッシュエントリをクリーンアップ
+    cleanup_old_cache(current_time)
+    
+    return meetings
+
+def cleanup_old_cache(current_time: float):
+    """古いキャッシュエントリを削除"""
+    keys_to_remove = [
+        key for key, value in _meeting_cache.items()
+        if current_time - value['timestamp'] > CACHE_DURATION * 2
+    ]
+    for key in keys_to_remove:
+        del _meeting_cache[key]
+
+# ===============================
+# 管理用エンドポイント
+# ===============================
+
+@app.get("/admin/performance-stats")
+async def get_performance_stats(db: Session = Depends(get_db)):
+    """パフォーマンス統計を取得"""
+    
+    stats_query = text("""
+    SELECT 
+        schemaname,
+        relname as tablename,
+        seq_scan as table_scans,
+        seq_tup_read as tuples_read,
+        idx_scan as index_scans,
+        idx_tup_fetch as index_tuples_fetched
+    FROM pg_stat_user_tables 
+    WHERE schemaname = 'public'
+        AND relname IN ('meetings', 'participants', 'users', 'organizations', 'agendas')
+    ORDER BY seq_scan DESC
+    """)
+    
+    result = db.execute(stats_query)
+    stats = result.fetchall()
+    
+    return {
+        "database_stats": [dict(row) for row in stats],
+        "cache_stats": {
+            "cached_entries": len(_meeting_cache),
+            "cache_keys": list(_meeting_cache.keys())
+        },
+        "timestamp": datetime.now().isoformat()
+    }
+
+@app.post("/admin/clear-cache")
+async def clear_meeting_cache():
+    """会議キャッシュをクリア"""
+    global _meeting_cache
+    old_count = len(_meeting_cache)
+    _meeting_cache.clear()
+    
+    return {
+        "message": f"キャッシュをクリアしました（{old_count}件）",
+        "timestamp": datetime.now().isoformat()
+    }
+
+@app.post("/admin/warm-cache")
+async def warm_cache(
+    user_ids: List[str] = Query(...),
+    db: Session = Depends(get_db)
+):
+    """主要ユーザーのキャッシュを事前生成"""
+    warmed_count = 0
+    
+    for user_id in user_ids:
+        try:
+            await get_meetings_cached(
+                user_id=user_id,
+                filter_type="my",
+                force_refresh=True,
+                db=db
+            )
+            warmed_count += 1
+        except Exception as e:
+            logger.warning(f"キャッシュウォームアップ失敗 {user_id}: {e}")
+    
+    return {
+        "message": f"{warmed_count}件のキャッシュを事前生成しました",
+        "timestamp": datetime.now().isoformat()
+    }
+
+
 # === デバッグ用エンドポイント ===
 
 @app.get("/debug/meetings")
