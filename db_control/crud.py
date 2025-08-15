@@ -97,7 +97,7 @@ ssl_cert = str('DigiCertGlobalRootCA.crt.pem')
 DATABASE_URL = f"postgresql+psycopg2://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 SSL_CERT_PATH = os.getenv("SSL_CERT_PATH")
 
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+# SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 # データベース接続の設定
 def get_database_config():
@@ -110,9 +110,11 @@ def get_database_config():
     return database_url
 
 # SQLAlchemy設定
-DATABASE_URL = get_database_config()
-engine = create_engine(DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False) # nakano add ●●●
+# DATABASE_URL = get_database_config() # nakano add ●●●
+# engine = create_engine(DATABASE_URL) # nakano add ●●●
+# SessionLocal = sessionmaker(autocommit=False, autoflush=False) # nakano add ●●●
+# DBエンジン作成は connect.pyに集約
+SessionLocal = sessionmaker(autocommit=False, autoflush=False)
 
 
 def get_db_connection():
