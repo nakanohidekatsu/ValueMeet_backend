@@ -74,8 +74,11 @@ else:
     # URLに ?sslmode=require を付けていない場合の保険
     connect_args = {"sslmode": "require"}
 
-
+from sqlalchemy import create_engine  # ●●● nakano 追加：SQLクエリをログ出力
+from sqlalchemy.orm import sessionmaker  # ●●● nakano 追加：SQLクエリをログ出力
+from .settings import DEBUG_SQL  # ●●● nakano 追加：SQLクエリをログ出力
 from db_control.crud import DEBUG_SQL  # ●●● nakano 追加：SQLクエリをログ出力
+from . import crud  # ← crud → connect の参照が無ければ循環にならない
 engine = create_engine(
     DATABASE_URL,
     echo=DEBUG_SQL,  # ●●● nakano 追加：SQLクエリをログ出力
@@ -84,6 +87,8 @@ engine = create_engine(
     pool_pre_ping=True,
     pool_recycle=3600,
 )
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)  # ●●● nakano 追加：SQLクエリをログ出力
+crud.SessionLocal.configure(bind=engine)
 # # db_control/connect.py
 # from sqlalchemy import create_engine
 

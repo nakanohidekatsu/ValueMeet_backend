@@ -112,7 +112,7 @@ def get_database_config():
 # SQLAlchemy設定
 DATABASE_URL = get_database_config()
 engine = create_engine(DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False) # nakano add ●●●
 
 
 def get_db_connection():
