@@ -34,6 +34,50 @@ logger = logging.getLogger(__name__)
 
 # Azure環境変数確認
 logger.info(f"🔍 DEBUG_HOTSPOTS: {os.getenv('DEBUG_HOTSPOTS')}")
+
+
+import time
+import logging
+import os
+from sqlalchemy import create_engine, event
+from sqlalchemy.engine import Engine
+
+# Azure App Service 用のログ設定
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# 環境変数でSQL監視を制御
+DEBUG_SQL = os.getenv("DEBUG_SQL", "false").lower() == "true"
+
+
+
+# SQL実行時間を自動測定（追加コード）
+if DEBUG_SQL:
+    # SQLクエリの実行時間を測定
+    @event.listens_for(Engine, "before_cursor_execute")
+    def receive_before_cursor_execute(conn, cursor, statement, parameters, context, executemany):
+        conn.info.setdefault('query_start_time', []).append(time.time())
+        
+        # クエリの開始ログ
+        logger.info(f"🔍 SQL開始: {statement[:100]}...")
+    
+    @event.listens_for(Engine, "after_cursor_execute")
+    def receive_after_cursor_execute(conn, cursor, statement, parameters, context, executemany):
+        total = time.time() - conn.info['query_start_time'].pop(-1)
+        
+        # 実行時間をログ出力
+        if total > 0.5:  # 0.5秒以上の場合は警告
+            logger.warning(f"🐌 遅いSQL: {total:.4f}秒 - {statement[:100]}...")
+        else:
+            logger.info(f"⚡ SQL完了: {total:.4f}秒")
+        
+        # パラメータも表示（デバッグ時）
+        if parameters and total > 1.0:  # 1秒以上の場合のみ
+            logger.info(f"📝 パラメータ: {parameters}")
+
 # ●●● nakano
 
 # データベース接続設定　#

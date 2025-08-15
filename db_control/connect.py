@@ -74,14 +74,16 @@ else:
     # URLに ?sslmode=require を付けていない場合の保険
     connect_args = {"sslmode": "require"}
 
+
+from crud import DEBUG_SQL  # ●●● nakano 追加：SQLクエリをログ出力
 engine = create_engine(
     DATABASE_URL,
+    echo=DEBUG_SQL,  # ●●● nakano 追加：SQLクエリをログ出力
     connect_args=connect_args,
     echo=True,
     pool_pre_ping=True,
     pool_recycle=3600,
 )
-
 # # db_control/connect.py
 # from sqlalchemy import create_engine
 
