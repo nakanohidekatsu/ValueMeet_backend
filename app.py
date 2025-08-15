@@ -577,43 +577,76 @@ async def get_meeting_list(
     meeting_type: Optional[str] = Query(None),
     db: Session = Depends(get_db) 
 ):
-    """会議一覧取得API（ルール違反・終了時間対応）"""
+    """会議一覧取得API（単一クエリ最適化版）"""
     try:
-        meeting_details = crud.get_meetings_by_user_with_details(
-            user_id=user_id,
-            start_datetime=start_datetime,
-            end_datetime=end_datetime,
-            organization_id=organization_id,
-            meeting_type=meeting_type
-        )
+        # 単一SQLクエリで全てのデータを取得
+        query = text("""
+            SELECT DISTINCT 
+                m.meeting_id,
+                m.title,
+                m.meeting_type,
+                m.meeting_mode,
+                m.date_time,
+                m.end_time,
+                m.status,
+                m.rule_violation,
+                m.created_by,
+                u.name as creator_name,
+                o.organization_name as creator_organization_name,
+                p.role_type,
+                a.purpose,
+                COALESCE(pc.participant_count, 0) as participant_count
+            FROM meetings m
+            LEFT OUTER JOIN users u ON m.created_by = u.user_id
+            LEFT OUTER JOIN organizations o ON u.organization_id = o.organization_id
+            LEFT OUTER JOIN participants p ON m.meeting_id = p.meeting_id AND p.user_id = :user_id
+            LEFT OUTER JOIN agendas a ON m.meeting_id = a.meeting_id
+            LEFT OUTER JOIN (
+                SELECT meeting_id, COUNT(*) as participant_count
+                FROM participants
+                GROUP BY meeting_id
+            ) pc ON m.meeting_id = pc.meeting_id
+            WHERE (m.created_by = :created_by OR p.user_id = :user_id_2)
+            ORDER BY m.date_time
+        """)
+        
+        result = db.execute(query, {
+            "user_id": user_id,
+            "created_by": user_id,
+            "user_id_2": user_id
+        })
+        
+        meetings = result.fetchall()
         
         meeting_list = []
-        for meeting, creator_name, creator_organization_name, role_type in meeting_details:
-            participant_count = crud.get_participant_count(db, meeting.meeting_id)
-            agenda = crud.get_agenda_by_meeting_id(meeting.meeting_id)
-            purpose = agenda.purpose if agenda else None
-            
-            meeting_item = MeetingListItem(
-                meeting_id=meeting.meeting_id,
-                title=meeting.title,
-                meeting_type=meeting.meeting_type,
-                meeting_mode=meeting.meeting_mode,
-                date_time=meeting.date_time.strftime("%Y-%m-%dT%H:%M:00"),
-                end_time=meeting.end_time.strftime("%H:%M") if hasattr(meeting, 'end_time') and meeting.end_time else None,
-                name=creator_name or "",
-                organization_name=creator_organization_name or "",
-                role_type=role_type,
-                purpose=purpose,
-                status=meeting.status if hasattr(meeting, 'status') and meeting.status else "scheduled",
-                participants=participant_count,
-                rule_violation=getattr(meeting, 'rule_violation', False) or False
-            )
-            meeting_list.append(meeting_item)
+        seen_meetings = set()
+        
+        for meeting in meetings:
+            if meeting.meeting_id not in seen_meetings:
+                seen_meetings.add(meeting.meeting_id)
+                
+                meeting_item = MeetingListItem(
+                    meeting_id=meeting.meeting_id,
+                    title=meeting.title,
+                    meeting_type=meeting.meeting_type,
+                    meeting_mode=meeting.meeting_mode,
+                    date_time=meeting.date_time.strftime("%Y-%m-%dT%H:%M:00"),
+                    end_time=meeting.end_time.strftime("%H:%M") if meeting.end_time else None,
+                    name=meeting.creator_name or "",
+                    organization_name=meeting.creator_organization_name or "",
+                    role_type=meeting.role_type,
+                    purpose=meeting.purpose,
+                    status=meeting.status if meeting.status else "scheduled",
+                    participants=meeting.participant_count,
+                    rule_violation=meeting.rule_violation or False
+                )
+                meeting_list.append(meeting_item)
         
         return meeting_list
+        
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
+    
 @app.get("/department_members", response_model=List[DepartmentMember])
 async def get_department_members(
     organization_id: int = Query(...),
