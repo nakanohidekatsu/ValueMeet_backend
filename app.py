@@ -577,80 +577,36 @@ async def get_meeting_list(
     meeting_type: Optional[str] = Query(None),
     db: Session = Depends(get_db) 
 ):
-    """会議一覧取得API（最適化版：1回のクエリで全データ取得）"""
+    """会議一覧取得API（ルール違反・終了時間対応）"""
     try:
-        # 単一クエリで全ての必要なデータを取得
-        query = text("""
-            WITH participant_counts AS (
-                SELECT meeting_id, COUNT(*) as participant_count
-                FROM participants
-                GROUP BY meeting_id
-            ),
-            user_meetings AS (
-                SELECT DISTINCT m.meeting_id
-                FROM meetings m
-                LEFT JOIN participants p ON m.meeting_id = p.meeting_id
-                WHERE m.created_by = :user_id OR p.user_id = :user_id
-            )
-            SELECT DISTINCT
-                m.meeting_id,
-                m.title,
-                m.meeting_type,
-                m.meeting_mode,
-                m.date_time,
-                m.end_time,
-                m.status,
-                m.rule_violation,
-                cu.name as creator_name,
-                co.organization_name as creator_organization_name,
-                up.role_type,
-                a.purpose,
-                COALESCE(pc.participant_count, 0) as participant_count
-            FROM user_meetings um
-            JOIN meetings m ON um.meeting_id = m.meeting_id
-            LEFT JOIN users cu ON m.created_by = cu.user_id
-            LEFT JOIN organizations co ON cu.organization_id = co.organization_id
-            LEFT JOIN participants up ON m.meeting_id = up.meeting_id AND up.user_id = :user_id
-            LEFT JOIN agendas a ON m.meeting_id = a.meeting_id
-            LEFT JOIN participant_counts pc ON m.meeting_id = pc.meeting_id
-            WHERE 1=1
-                AND (:start_datetime IS NULL OR m.date_time >= 
-                    CAST(:start_datetime AS timestamp))
-                AND (:end_datetime IS NULL OR m.date_time <= 
-                    CAST(:end_datetime AS timestamp))
-                AND (:organization_id IS NULL OR cu.organization_id = :organization_id)
-                AND (:meeting_type IS NULL OR m.meeting_type = :meeting_type)
-            ORDER BY m.date_time
-        """)
-        
-        # パラメータの準備
-        params = {
-            "user_id": user_id,
-            "start_datetime": datetime.strptime(start_datetime, "%Y/%m/%d %H:%M") if start_datetime else None,
-            "end_datetime": datetime.strptime(end_datetime, "%Y/%m/%d %H:%M") if end_datetime else None,
-            "organization_id": organization_id,
-            "meeting_type": meeting_type
-        }
-        
-        result = db.execute(query, params)
-        meetings = result.fetchall()
+        meeting_details = crud.get_meetings_by_user_with_details(
+            user_id=user_id,
+            start_datetime=start_datetime,
+            end_datetime=end_datetime,
+            organization_id=organization_id,
+            meeting_type=meeting_type
+        )
         
         meeting_list = []
-        for meeting in meetings:
+        for meeting, creator_name, creator_organization_name, role_type in meeting_details:
+            participant_count = crud.get_participant_count(db, meeting.meeting_id)
+            agenda = crud.get_agenda_by_meeting_id(meeting.meeting_id)
+            purpose = agenda.purpose if agenda else None
+            
             meeting_item = MeetingListItem(
                 meeting_id=meeting.meeting_id,
                 title=meeting.title,
                 meeting_type=meeting.meeting_type,
                 meeting_mode=meeting.meeting_mode,
                 date_time=meeting.date_time.strftime("%Y-%m-%dT%H:%M:00"),
-                end_time=meeting.end_time.strftime("%H:%M") if meeting.end_time else None,
-                name=meeting.creator_name or "",
-                organization_name=meeting.creator_organization_name or "",
-                role_type=meeting.role_type,
-                purpose=meeting.purpose,
-                status=meeting.status or "scheduled",
-                participants=meeting.participant_count,
-                rule_violation=meeting.rule_violation or False
+                end_time=meeting.end_time.strftime("%H:%M") if hasattr(meeting, 'end_time') and meeting.end_time else None,
+                name=creator_name or "",
+                organization_name=creator_organization_name or "",
+                role_type=role_type,
+                purpose=purpose,
+                status=meeting.status if hasattr(meeting, 'status') and meeting.status else "scheduled",
+                participants=participant_count,
+                rule_violation=getattr(meeting, 'rule_violation', False) or False
             )
             meeting_list.append(meeting_item)
         
@@ -658,98 +614,38 @@ async def get_meeting_list(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/department_meetings", response_model=List[MeetingListItem])  
-async def get_department_meetings(
+@app.get("/department_members", response_model=List[DepartmentMember])
+async def get_department_members(
     organization_id: int = Query(...),
-    start_datetime: Optional[str] = Query(None),
-    end_datetime: Optional[str] = Query(None),
-    meeting_type: Optional[str] = Query(None),
     db: Session = Depends(get_db)
 ):
-    """部内会議一覧取得API（最適化版：1回のクエリで全データ取得）"""
+    """部内メンバー一覧取得API"""
     try:
-        # 単一クエリで全ての必要なデータを取得
+        # 組織に所属するユーザーを取得
         query = text("""
-            WITH participant_counts AS (
-                SELECT meeting_id, COUNT(*) as participant_count
-                FROM participants
-                GROUP BY meeting_id
-            ),
-            org_meetings AS (
-                SELECT DISTINCT m.meeting_id
-                FROM meetings m
-                LEFT JOIN users cu ON m.created_by = cu.user_id
-                LEFT JOIN participants p ON m.meeting_id = p.meeting_id
-                LEFT JOIN users pu ON p.user_id = pu.user_id
-                WHERE cu.organization_id = :organization_id 
-                   OR pu.organization_id = :organization_id
-            )
-            SELECT DISTINCT
-                m.meeting_id,
-                m.title,
-                m.meeting_type,
-                m.meeting_mode,
-                m.date_time,
-                m.end_time,
-                m.status,
-                m.rule_violation,
-                cu.name as creator_name,
-                co.organization_name as creator_organization_name,
-                p.role_type,
-                a.purpose,
-                COALESCE(pc.participant_count, 0) as participant_count
-            FROM org_meetings om
-            JOIN meetings m ON om.meeting_id = m.meeting_id
-            LEFT JOIN users cu ON m.created_by = cu.user_id
-            LEFT JOIN organizations co ON cu.organization_id = co.organization_id
-            LEFT JOIN participants p ON m.meeting_id = p.meeting_id
-            LEFT JOIN agendas a ON m.meeting_id = a.meeting_id
-            LEFT JOIN participant_counts pc ON m.meeting_id = pc.meeting_id
-            WHERE 1=1
-                AND (:start_datetime IS NULL OR m.date_time >= 
-                    CAST(:start_datetime AS timestamp))
-                AND (:end_datetime IS NULL OR m.date_time <= 
-                    CAST(:end_datetime AS timestamp))
-                AND (:meeting_type IS NULL OR m.meeting_type = :meeting_type)
-            ORDER BY m.date_time
+            SELECT u.user_id, u.name, o.organization_name
+            FROM users u
+            LEFT JOIN organizations o ON u.organization_id = o.organization_id
+            WHERE u.organization_id = :organization_id
+            ORDER BY u.name
         """)
         
-        # パラメータの準備
-        params = {
-            "organization_id": organization_id,
-            "start_datetime": datetime.strptime(start_datetime, "%Y/%m/%d %H:%M") if start_datetime else None,
-            "end_datetime": datetime.strptime(end_datetime, "%Y/%m/%d %H:%M") if end_datetime else None,
-            "meeting_type": meeting_type
-        }
+        result = db.execute(query, {"organization_id": organization_id})
+        members = result.fetchall()
         
-        result = db.execute(query, params)
-        meetings = result.fetchall()
-        
-        meeting_list = []
-        for meeting in meetings:
-            meeting_item = MeetingListItem(
-                meeting_id=meeting.meeting_id,
-                title=meeting.title,
-                meeting_type=meeting.meeting_type,
-                meeting_mode=meeting.meeting_mode,
-                date_time=meeting.date_time.strftime("%Y-%m-%dT%H:%M:00"),
-                end_time=meeting.end_time.strftime("%H:%M") if meeting.end_time else None,
-                name=meeting.creator_name or "",
-                organization_name=meeting.creator_organization_name or "",
-                role_type=meeting.role_type,
-                purpose=meeting.purpose,
-                status=meeting.status or "scheduled",
-                participants=meeting.participant_count,
-                rule_violation=meeting.rule_violation or False
+        return [
+            DepartmentMember(
+                user_id=member.user_id,
+                name=member.name,
+                organization_name=member.organization_name or ""
             )
-            meeting_list.append(meeting_item)
-        
-        return meeting_list
+            for member in members
+        ]
     
     except Exception as e:
         raise HTTPException(
             status_code=500, 
-            detail=f"部内会議一覧取得中にエラーが発生しました: {str(e)}"
+            detail=f"部内メンバー取得中にエラーが発生しました: {str(e)}"
         )
 
 @app.get("/department_meetings", response_model=List[MeetingListItem])  
