@@ -23,6 +23,7 @@ from sqlalchemy import func
 from .mymodels import Tag
 from .mymodels import User, Participant
 from pgvector.sqlalchemy import Vector
+from .connect import SessionLocal, engine  # ← これで crud からも見えるようにする
 
 # 環境変数の読み込み
 load_dotenv()

@@ -14,7 +14,7 @@ from sqlalchemy.orm import sessionmaker, Session
 
 from db_control import crud, mymodels
 from db_control.create_tables import init_db
-from db_control.crud import SessionLocal
+from db_control.connect import SessionLocal, engine
 
 # schemas.pyから必要なモデルをimport
 from schemas import LoginRequest, LoginResponse, ResetPasswordRequest, MessageResponse
