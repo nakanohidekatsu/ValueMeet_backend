@@ -17,7 +17,7 @@ from typing import List, Optional
 import os
 from dotenv import load_dotenv
 from . import mymodels
-from db_control.connect import engine
+# from db_control.connect import engine
 from sqlalchemy import func
 
 from .mymodels import Tag
@@ -50,8 +50,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # 環境変数でSQL監視を制御
-DEBUG_SQL = os.getenv("DEBUG_SQL", "false").lower() == "true"
-
+# DEBUG_SQL = os.getenv("DEBUG_SQL", "false").lower() == "true"
+DEBUG_SQL = os.getenv("DEBUG_SQL", "0").lower() in {"1","true","yes","on"}
 
 
 # SQL実行時間を自動測定（追加コード）
