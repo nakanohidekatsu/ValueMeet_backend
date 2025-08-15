@@ -75,7 +75,7 @@ else:
     connect_args = {"sslmode": "require"}
 
 
-from crud import DEBUG_SQL  # ●●● nakano 追加：SQLクエリをログ出力
+from db_control.crud import DEBUG_SQL  # ●●● nakano 追加：SQLクエリをログ出力
 engine = create_engine(
     DATABASE_URL,
     echo=DEBUG_SQL,  # ●●● nakano 追加：SQLクエリをログ出力
