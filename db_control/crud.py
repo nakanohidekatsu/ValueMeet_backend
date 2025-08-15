@@ -27,6 +27,15 @@ from pgvector.sqlalchemy import Vector
 # 環境変数の読み込み
 load_dotenv()
 
+# ●●● nakano
+import logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Azure環境変数確認
+logger.info(f"🔍 DEBUG_HOTSPOTS: {os.getenv('DEBUG_HOTSPOTS')}")
+# ●●● nakano
+
 # データベース接続設定　#
 # DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://user:password@localhost/postgres")
 # engine = create_engine(DATABASE_URL)
