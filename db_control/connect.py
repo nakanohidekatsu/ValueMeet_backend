@@ -80,7 +80,7 @@ engine = create_engine(
     DATABASE_URL,
     echo=DEBUG_SQL,  # ●●● nakano 追加：SQLクエリをログ出力
     connect_args=connect_args,
-    echo=True,
+#    echo=True, # ●●● nakano 追加：SQLクエリをログ出力
     pool_pre_ping=True,
     pool_recycle=3600,
 )
