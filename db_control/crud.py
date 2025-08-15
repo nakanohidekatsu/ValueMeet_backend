@@ -114,7 +114,7 @@ def get_database_config():
 # engine = create_engine(DATABASE_URL) # nakano add ●●●
 # SessionLocal = sessionmaker(autocommit=False, autoflush=False) # nakano add ●●●
 # DBエンジン作成は connect.pyに集約
-SessionLocal = sessionmaker(autocommit=False, autoflush=False)
+# SessionLocal = sessionmaker(autocommit=False, autoflush=False)
 
 
 def get_db_connection():

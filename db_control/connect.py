@@ -79,6 +79,8 @@ from sqlalchemy.orm import sessionmaker  # ●●● nakano 追加：SQLクエ�
 from .settings import DEBUG_SQL  # ●●● nakano 追加：SQLクエリをログ出力
 from . import crud  # ← crud → connect の参照が無ければ循環にならない
 
+DEBUG_SQL = os.getenv("DEBUG_SQL", "0").lower() in {"1", "true", "yes", "on"}
+
 engine = create_engine(
     DATABASE_URL,
     echo=DEBUG_SQL,  # ●●● nakano 追加：SQLクエリをログ出力
