@@ -19,6 +19,9 @@ from db_control.connect import SessionLocal, engine
 # schemas.pyから必要なモデルをimport
 from schemas import LoginRequest, LoginResponse, ResetPasswordRequest, MessageResponse
 
+import logging
+logger = logging.getLogger(__name__)
+
 # アプリケーション初期化時にテーブルを作成
 init_db()
 
