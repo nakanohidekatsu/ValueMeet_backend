@@ -570,7 +570,7 @@ async def get_usr_profile(user_id: str = Query(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/meeting_list", response_model=List[MeetingListItem])
-async def get_meeting_list_v2_comment(
+async def get_meeting_list_v2(
     user_id: str = Query(...),
     start_datetime: Optional[str] = Query(None),
     end_datetime: Optional[str] = Query(None),
