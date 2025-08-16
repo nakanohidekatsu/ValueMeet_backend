@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field
 import os
 import json
+import time
 from openai import OpenAI
 from dotenv import load_dotenv
 from typing import Optional, List
@@ -569,7 +570,7 @@ async def get_usr_profile(user_id: str = Query(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/meeting_list", response_model=List[MeetingListItem])
-async def get_meeting_list(
+async def get_meeting_list_v2_comment(
     user_id: str = Query(...),
     start_datetime: Optional[str] = Query(None),
     end_datetime: Optional[str] = Query(None),
@@ -577,11 +578,29 @@ async def get_meeting_list(
     meeting_type: Optional[str] = Query(None),
     db: Session = Depends(get_db) 
 ):
-    """会議一覧取得API（単一クエリ最適化版）"""
+    """会議一覧取得API（完全最適化版 - N+1クエリ完全回避）"""
+    
+    start_time = time.time()
+    logger.info(f"🚀 最適化版meeting_list開始: user_id={user_id}")
+    
     try:
-        # 単一SQLクエリで全てのデータを取得
+        # ★★★ 単一SQLクエリで全てを取得 ★★★
         query = text("""
-            SELECT DISTINCT 
+            WITH user_meetings AS (
+                SELECT DISTINCT m.meeting_id
+                FROM meetings m
+                LEFT JOIN participants p ON m.meeting_id = p.meeting_id
+                WHERE m.created_by = :user_id OR p.user_id = :user_id
+            ),
+            meeting_participant_counts AS (
+                SELECT 
+                    meeting_id, 
+                    COUNT(participant_id) as participant_count
+                FROM participants
+                WHERE meeting_id IN (SELECT meeting_id FROM user_meetings)
+                GROUP BY meeting_id
+            )
+            SELECT DISTINCT
                 m.meeting_id,
                 m.title,
                 m.meeting_type,
@@ -590,61 +609,62 @@ async def get_meeting_list(
                 m.end_time,
                 m.status,
                 m.rule_violation,
-                m.created_by,
                 u.name as creator_name,
                 o.organization_name as creator_organization_name,
-                p.role_type,
+                p_role.role_type,
                 a.purpose,
-                COALESCE(pc.participant_count, 0) as participant_count
+                COALESCE(mpc.participant_count, 0) as participant_count
             FROM meetings m
-            LEFT OUTER JOIN users u ON m.created_by = u.user_id
-            LEFT OUTER JOIN organizations o ON u.organization_id = o.organization_id
-            LEFT OUTER JOIN participants p ON m.meeting_id = p.meeting_id AND p.user_id = :user_id
-            LEFT OUTER JOIN agendas a ON m.meeting_id = a.meeting_id
-            LEFT OUTER JOIN (
-                SELECT meeting_id, COUNT(*) as participant_count
-                FROM participants
-                GROUP BY meeting_id
-            ) pc ON m.meeting_id = pc.meeting_id
-            WHERE (m.created_by = :created_by OR p.user_id = :user_id_2)
+            INNER JOIN user_meetings um ON m.meeting_id = um.meeting_id
+            LEFT JOIN users u ON m.created_by = u.user_id
+            LEFT JOIN organizations o ON u.organization_id = o.organization_id
+            LEFT JOIN participants p_role ON (
+                m.meeting_id = p_role.meeting_id AND p_role.user_id = :user_id
+            )
+            LEFT JOIN agendas a ON m.meeting_id = a.meeting_id
+            LEFT JOIN meeting_participant_counts mpc ON m.meeting_id = mpc.meeting_id
             ORDER BY m.date_time
         """)
         
-        result = db.execute(query, {
-            "user_id": user_id,
-            "created_by": user_id,
-            "user_id_2": user_id
-        })
+        result = db.execute(query, {"user_id": user_id})
+        meetings_raw = result.fetchall()
         
-        meetings = result.fetchall()
+        query_time = time.time() - start_time
+        logger.info(f"⚡ 単一クエリ完了: {query_time:.4f}秒, {len(meetings_raw)}件取得")
         
+        # 結果変換
         meeting_list = []
         seen_meetings = set()
         
-        for meeting in meetings:
-            if meeting.meeting_id not in seen_meetings:
-                seen_meetings.add(meeting.meeting_id)
+        for row in meetings_raw:
+            if row.meeting_id not in seen_meetings:
+                seen_meetings.add(row.meeting_id)
                 
                 meeting_item = MeetingListItem(
-                    meeting_id=meeting.meeting_id,
-                    title=meeting.title,
-                    meeting_type=meeting.meeting_type,
-                    meeting_mode=meeting.meeting_mode,
-                    date_time=meeting.date_time.strftime("%Y-%m-%dT%H:%M:00"),
-                    end_time=meeting.end_time.strftime("%H:%M") if meeting.end_time else None,
-                    name=meeting.creator_name or "",
-                    organization_name=meeting.creator_organization_name or "",
-                    role_type=meeting.role_type,
-                    purpose=meeting.purpose,
-                    status=meeting.status if meeting.status else "scheduled",
-                    participants=meeting.participant_count,
-                    rule_violation=meeting.rule_violation or False
+                    meeting_id=row.meeting_id,
+                    title=row.title,
+                    meeting_type=row.meeting_type or "",
+                    meeting_mode=row.meeting_mode or "",
+                    date_time=row.date_time.strftime("%Y-%m-%dT%H:%M:00"),
+                    end_time=row.end_time.strftime("%H:%M") if row.end_time else None,
+                    name=row.creator_name or "",
+                    organization_name=row.creator_organization_name or "",
+                    role_type=row.role_type,
+                    purpose=row.purpose,
+                    status=row.status or "scheduled",
+                    participants=row.participant_count,
+                    rule_violation=row.rule_violation or False
                 )
                 meeting_list.append(meeting_item)
+        
+        total_time = time.time() - start_time
+        logger.info(f"✅ 会議一覧完了: {len(meeting_list)}件, 総時間{total_time:.4f}秒")
         
         return meeting_list
         
     except Exception as e:
+        error_time = time.time() - start_time
+        logger.error(f"❌ エラー ({error_time:.4f}秒): {e}")
         raise HTTPException(status_code=500, detail=str(e))
     
 @app.get("/department_members", response_model=List[DepartmentMember])
