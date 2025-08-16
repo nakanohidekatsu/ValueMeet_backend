@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 import os
 import json
 import time
+from datetime import datetime, time as dt_time  # ← 追加：datetime と time をインポート
 from openai import OpenAI
 from dotenv import load_dotenv
 from typing import Optional, List
@@ -396,9 +397,10 @@ async def create_meeting(meeting: MeetingCreate, db: Session = Depends(get_db)):
             # HH:MM形式の文字列をtime型に変換
             try:
                 time_parts = meeting.end_time.split(':')
-                end_time = time(int(time_parts[0]), int(time_parts[1]))
+                end_time = dt_time(int(time_parts[0]), int(time_parts[1]))  # ← 修正：time → dt_time
             except (ValueError, IndexError):
                 raise HTTPException(status_code=400, detail="終了時間の形式が正しくありません (HH:MM)")
+
 
         # SQLを直接使用して会議を作成（新しいフィールドを含む）
         insert_query = text("""
@@ -1078,7 +1080,7 @@ async def create_attendance(attend: AttendCreate):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/attend_batch")
-async def create_attendance_batch(attend_batch: AttendCreateBatch):
+async def create_attendance_batch(attend_batch: AttendCreateBatch, db: Session = Depends(get_db)):  # ← 追加：db依存関係を追加
     """
     参加者一括登録API
     複数の参加者をまとめて登録する
