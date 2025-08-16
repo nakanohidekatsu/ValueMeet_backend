@@ -703,7 +703,7 @@ async def get_department_members(
             detail=f"部内メンバー取得中にエラーが発生しました: {str(e)}"
         )
 
-@app.get("/department_meetings", response_model=List[MeetingListItem])  
+@app.get("/department_meetings", response_model=List[MeetingListItem])
 async def get_department_meetings(
     organization_id: int = Query(...),
     start_datetime: Optional[str] = Query(None),
@@ -711,59 +711,100 @@ async def get_department_meetings(
     meeting_type: Optional[str] = Query(None),
     db: Session = Depends(get_db)
 ):
-    """部内会議一覧取得API（ルール違反・終了時間対応）"""
+    """部内会議一覧取得API（最適化版 - N+1問題解決）"""
+    
+    start_time = time.time()
+    
     try:
-        # 組織に所属するユーザーが作成または参加した会議を取得
-        query = text("""
-            SELECT DISTINCT m.meeting_id, m.title, m.meeting_type, m.meeting_mode, 
-                   m.date_time, m.end_time, m.status, m.rule_violation, 
-                   u.name, o.organization_name, p.role_type
+        logger.info(f"🚀 部内会議一覧開始: organization_id={organization_id}")
+        
+        # 単一の最適化されたクエリで全データを取得
+        optimized_query = text("""
+            SELECT DISTINCT 
+                m.meeting_id,
+                m.title,
+                m.meeting_type,
+                m.meeting_mode,
+                m.date_time,
+                m.end_time,
+                m.status,
+                m.rule_violation,
+                u.name,
+                o.organization_name,
+                p.role_type,
+                -- サブクエリで参加者数を取得（N+1問題を解決）
+                (SELECT COUNT(*) 
+                 FROM participants p2 
+                 WHERE p2.meeting_id = m.meeting_id) as participant_count,
+                -- サブクエリでアジェンダの目的を取得（N+1問題を解決）
+                (SELECT a.purpose 
+                 FROM agendas a 
+                 WHERE a.meeting_id = m.meeting_id 
+                 ORDER BY a.agenda_id 
+                 LIMIT 1) as purpose
             FROM meetings m
             LEFT JOIN users u ON m.created_by = u.user_id
             LEFT JOIN organizations o ON u.organization_id = o.organization_id
             LEFT JOIN participants p ON m.meeting_id = p.meeting_id
             LEFT JOIN users pu ON p.user_id = pu.user_id
-            WHERE (u.organization_id = :organization_id 
+            WHERE (u.organization_id = :organization_id
                    OR pu.organization_id = :organization_id)
+                -- 日時フィルタリング（オプション）
+                AND (:start_datetime IS NULL OR m.date_time >= :start_datetime)
+                AND (:end_datetime IS NULL OR m.date_time <= :end_datetime)
+                -- 会議タイプフィルタリング（オプション）
+                AND (:meeting_type IS NULL OR m.meeting_type = :meeting_type)
             ORDER BY m.date_time
         """)
         
-        result = db.execute(query, {"organization_id": organization_id})
-        meetings = result.fetchall()
+        # パラメータ準備
+        params = {
+            "organization_id": organization_id,
+            "start_datetime": start_datetime,
+            "end_datetime": end_datetime,
+            "meeting_type": meeting_type
+        }
         
+        query_start = time.time()
+        result = db.execute(optimized_query, params)
+        meetings = result.fetchall()
+        query_time = time.time() - query_start
+        
+        logger.info(f"⚡ 部内会議クエリ完了: {query_time:.4f}秒, {len(meetings)}件取得")
+        
+        # レスポンス形式に変換
         meeting_list = []
         for meeting in meetings:
-            # 実際の参加者数を計算
-            participant_count = crud.get_participant_count(db, meeting.meeting_id)
-            
-            # アジェンダから目的を取得
-            agenda = crud.get_agenda_by_meeting_id(meeting.meeting_id)
-            purpose = agenda.purpose if agenda else None
-            
             meeting_item = MeetingListItem(
                 meeting_id=meeting.meeting_id,
                 title=meeting.title,
                 meeting_type=meeting.meeting_type,
                 meeting_mode=meeting.meeting_mode,
-                date_time=meeting.date_time.strftime("%Y-%m-%dT%H:%M:00"),
+                date_time=meeting.date_time.strftime("%Y-%m-%dT%H:%M:00") if meeting.date_time else None,
                 end_time=meeting.end_time.strftime("%H:%M") if meeting.end_time else None,
                 name=meeting.name or "",
                 organization_name=meeting.organization_name or "",
                 role_type=meeting.role_type,
-                purpose=purpose,
+                purpose=meeting.purpose,  # サブクエリから直接取得
                 status=meeting.status if hasattr(meeting, 'status') and meeting.status else "scheduled",
-                participants=participant_count,
+                participants=meeting.participant_count or 0,  # サブクエリから直接取得
                 rule_violation=getattr(meeting, 'rule_violation', False) or False
             )
             meeting_list.append(meeting_item)
         
+        total_time = time.time() - start_time
+        logger.info(f"✅ 部内会議一覧完了: {len(meeting_list)}件, 総時間{total_time:.4f}秒")
+        
         return meeting_list
-    
+        
     except Exception as e:
+        total_time = time.time() - start_time
+        logger.error(f"❌ 部内会議一覧エラー: {str(e)}, 実行時間: {total_time:.4f}秒")
         raise HTTPException(
-            status_code=500, 
+            status_code=500,
             detail=f"部内会議一覧取得中にエラーが発生しました: {str(e)}"
         )
+
 
 @app.get("/member_meetings", response_model=List[MeetingListItem])
 async def get_member_meetings(
