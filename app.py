@@ -9,7 +9,6 @@ import time
 from openai import OpenAI
 from dotenv import load_dotenv
 from typing import Optional, List
-from datetime import datetime, date, time
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
 
