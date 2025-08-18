@@ -198,16 +198,19 @@ class ParticipantResponse(BaseModel):
 app = FastAPI(title="Meeting Management API - Enhanced")
 
 # きょん：APIルーター用コード
-from api.todo import router as todo_router
+from api.todo_extract import router as extract_router
+from api.todo_register import router as register_router
 from api.evaluation import router as evaluation_router
 
-app.include_router(todo_router)
+app.include_router(extract_router)
+app.include_router(register_router)
 app.include_router(evaluation_router)
 
 # CORS設定
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:3000"],              # 開発用
+    allow_origin_regex=r"https://.*\.vercel\.app",        # Vercel本番/プレビュー
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

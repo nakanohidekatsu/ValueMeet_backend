@@ -89,6 +89,25 @@ engine = create_engine(
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)  # ●●● nakano 追加：SQLクエリをログ出力
 
+from sqlalchemy.orm import sessionmaker, Session
+
+# ========= セッション管理 =========
+# SQLAlchemy では engine から直接クエリを書くこともできるが、
+# FastAPI では「リクエストごとにDBセッションを開き、処理後に閉じる」
+# という管理が必要になる。
+# → そのため sessionmaker を使って「セッション工場」を作っておく。
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+# FastAPI の Depends で利用するための関数
+# 呼び出し側で「db: Session = Depends(get_db)」と書くと
+# ここでセッションが開かれ、処理が終わったら finally で閉じられる。
+def get_db() -> Session:
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
 # # db_control/connect.py
 # from sqlalchemy import create_engine
 
