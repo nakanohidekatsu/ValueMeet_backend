@@ -19,3 +19,5 @@ venv/
 # その他エディタ設定
 .vscode/
 .idea/
+
+test_openai_key.py
