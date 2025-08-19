@@ -9,7 +9,7 @@ import time
 from datetime import datetime, time as dt_time  # ← 追加：datetime と time をインポート
 from openai import OpenAI
 from dotenv import load_dotenv
-from typing import Optional, List
+from typing import Optional, List, Literal
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
 
@@ -196,13 +196,13 @@ class ParticipantResponse(BaseModel):
 
 # 新規追加: 目的チェック用のモデル
 class PurposeCheckRequest(BaseModel):
-    purpose: str
     title: str
     description: str
+    purpose: str
 
 class PurposeCheckResponse(BaseModel):
-    status: str  # "要検討" または "目的チェック済"
-    messages: List[str]
+    status: Literal["要検討", "目的チェック済"]
+    messages: List[str] = Field(default_factory=list)
 
 # === FastAPI アプリケーション ===
 app = FastAPI(title="Meeting Management API - Enhanced")
@@ -1176,56 +1176,56 @@ async def delete_meeting(meeting_id: int):
 async def purpose_check_endpoint(request: PurposeCheckRequest):
     return await check_purpose(request)
 
-# 目的チェック関数
-async def check_purpose(request: PurposeCheckRequest):
-    if not openai.api_key:
-        return PurposeCheckResponse(
-            status="要検討",
-            messages=["目的チェック機能が利用できません。"]
-        )
-    
+async def check_purpose(request: PurposeCheckRequest) -> PurposeCheckResponse:
     try:
-        prompt = f"""
-会議タイトル: {request.title}
-会議概要: {request.description}  
-会議の目的: {request.purpose}
+        if not os.getenv("OPENAI_API_KEY"):
+            return PurposeCheckResponse(
+                status="要検討",
+                messages=["目的チェック機能が利用できません。APIキーが未設定です。"]
+            )
 
-この会議の目的が明確で、タイトル・概要と整合性があるかチェックしてください。
-問題があれば「要検討」、適切なら「目的チェック済」として回答してください。
-"""
-        
-        response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",
+        prompt = (
+            f"会議タイトル: {request.title}\n"
+            f"会議概要: {request.description}\n"
+            f"会議の目的: {request.purpose}\n\n"
+            "この会議の目的が明確で、タイトル・概要と整合性があるかチェックしてください。"
+            "問題があれば「要検討」、適切なら「目的チェック済」として回答してください。"
+        )
+
+        # モデルは環境変数で差し替え可能に（例: gpt-4o-mini など現行のモデル）
+        model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+
+        resp = client.chat.completions.create(
+            model=model,
             messages=[
                 {"role": "system", "content": "会議の目的をチェックする専門家として回答してください。"},
-                {"role": "user", "content": prompt}
+                {"role": "user", "content": prompt},
             ],
             max_tokens=300,
-            temperature=0.3
+            temperature=0.3,
         )
-        
-        ai_response = response.choices[0].message.content.strip()
-        
-        if "要検討" in ai_response:
-            status = "要検討"
-        else:
-            status = "目的チェック済"
-            
-        # メッセージ抽出
-        lines = ai_response.split('\n')
-        messages = [line.strip() for line in lines if line.strip() and not line.startswith('△') and not line.startswith('⚪')]
-        
-        if not messages:
-            messages = ["チェックが完了しました。"]
-            
-        return PurposeCheckResponse(status=status, messages=messages)
-        
-    except Exception:
+
+        ai_text = (resp.choices[0].message.content or "").strip()
+
+        status = "要検討" if "要検討" in ai_text else "目的チェック済"
+
+        lines = [
+            ln.strip()
+            for ln in ai_text.splitlines()
+            if ln.strip() and not ln.startswith(("△", "⚪"))
+        ]
+        if not lines:
+            lines = ["チェックが完了しました。"]
+
+        return PurposeCheckResponse(status=status, messages=lines)
+
+    except Exception as e:
+        logger.exception("purpose_check failed: %s | payload=%s", e, request.model_dump())
+        # ここでは 200 で安全な応答を返す方針（UI 崩壊を防ぐ）
         return PurposeCheckResponse(
             status="要検討",
             messages=["エラーが発生しました。手動で確認してください。"]
         )
-        
 
 # === デバッグ用エンドポイント ===
 
