@@ -194,6 +194,16 @@ class ParticipantResponse(BaseModel):
     role_type: str
     email: Optional[str] = None
 
+# 新規追加: 目的チェック用のモデル
+class PurposeCheckRequest(BaseModel):
+    purpose: str
+    title: str
+    description: str
+
+class PurposeCheckResponse(BaseModel):
+    status: str  # "要検討" または "目的チェック済"
+    messages: List[str]
+
 # === FastAPI アプリケーション ===
 app = FastAPI(title="Meeting Management API - Enhanced")
 
@@ -1161,6 +1171,61 @@ async def delete_meeting(meeting_id: int):
         return {"status": "success", "message": "Meeting deleted successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/purpose_check", response_model=PurposeCheckResponse)
+async def purpose_check_endpoint(request: PurposeCheckRequest):
+    return await check_purpose(request)
+
+# 目的チェック関数
+async def check_purpose(request: PurposeCheckRequest):
+    if not openai.api_key:
+        return PurposeCheckResponse(
+            status="要検討",
+            messages=["目的チェック機能が利用できません。"]
+        )
+    
+    try:
+        prompt = f"""
+会議タイトル: {request.title}
+会議概要: {request.description}  
+会議の目的: {request.purpose}
+
+この会議の目的が明確で、タイトル・概要と整合性があるかチェックしてください。
+問題があれば「要検討」、適切なら「目的チェック済」として回答してください。
+"""
+        
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "会議の目的をチェックする専門家として回答してください。"},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=300,
+            temperature=0.3
+        )
+        
+        ai_response = response.choices[0].message.content.strip()
+        
+        if "要検討" in ai_response:
+            status = "要検討"
+        else:
+            status = "目的チェック済"
+            
+        # メッセージ抽出
+        lines = ai_response.split('\n')
+        messages = [line.strip() for line in lines if line.strip() and not line.startswith('△') and not line.startswith('⚪')]
+        
+        if not messages:
+            messages = ["チェックが完了しました。"]
+            
+        return PurposeCheckResponse(status=status, messages=messages)
+        
+    except Exception:
+        return PurposeCheckResponse(
+            status="要検討",
+            messages=["エラーが発生しました。手動で確認してください。"]
+        )
+        
 
 # === デバッグ用エンドポイント ===
 
