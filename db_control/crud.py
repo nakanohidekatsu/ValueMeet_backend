@@ -300,6 +300,7 @@ def get_meetings_by_user(user_id: str, start_datetime: Optional[str] = None,
         query = query.order_by(mymodels.Meeting.date_time)
         
         return db.execute(query).scalars().all()
+
 # === Agenda関連 ===
 
 def create_agenda(meeting_id: int, purpose: Optional[str], topic: Optional[str]) -> int:
@@ -434,6 +435,90 @@ def get_users_by_meeting_ids(
         .distinct()
     )
     return db.execute(stmt).scalars().all()
+
+# 🆕 会議名取得機能を追加
+def get_meeting_title_by_id(meeting_id: int) -> Optional[str]:
+    """会議IDから会議タイトルを取得"""
+    with SessionLocal() as db:
+        try:
+            meeting = db.execute(
+                select(mymodels.Meeting.title).where(mymodels.Meeting.meeting_id == meeting_id)
+            ).scalar_one_or_none()
+            return meeting
+        except Exception as e:
+            print(f"会議タイトル取得エラー: {e}")
+            return None
+
+# 🆕 ユーザーの参加履歴と会議名を一緒に取得する関数
+def get_user_participation_history_with_meeting_titles(
+    db: Session,
+    meeting_ids: list[int]
+) -> dict[str, dict]:
+    """
+    指定された会議IDリストに参加しているユーザーの履歴を取得
+    戻り値: {user_id: {'role': str, 'meeting_title': str, 'meeting_id': int}}
+    """
+    try:
+        # 参加者情報と会議情報を一度に取得するクエリ
+        stmt = (
+            select(
+                mymodels.Participant.user_id,
+                mymodels.Participant.role_type,
+                mymodels.Meeting.title.label('meeting_title'),
+                mymodels.Meeting.meeting_id
+            )
+            .join(mymodels.Meeting, mymodels.Participant.meeting_id == mymodels.Meeting.meeting_id)
+            .where(mymodels.Participant.meeting_id.in_(meeting_ids))
+        )
+        
+        result = db.execute(stmt).fetchall()
+        
+        # ユーザーごとの最初の参加履歴を記録（最新の会議を優先）
+        user_history = {}
+        for row in result:
+            if row.user_id not in user_history:
+                user_history[row.user_id] = {
+                    'role': row.role_type,
+                    'meeting_title': row.meeting_title,
+                    'meeting_id': row.meeting_id
+                }
+        
+        return user_history
+        
+    except Exception as e:
+        print(f"参加履歴取得エラー: {e}")
+        return {}
+
+# 🆕 既存のget_users_by_meeting_ids関数を拡張（修正版）
+def get_users_by_meeting_ids_with_history(
+    db: Session,
+    meeting_ids: list[int]
+) -> list[tuple[User, str, str, int]]:
+    """
+    与えられた meeting_id リストに参加しているユーザーを取得し、
+    各ユーザーの役割と会議名も一緒に返す
+    戻り値: [(User, role, meeting_title, meeting_id), ...]
+    """
+    try:
+        # ユーザー、参加者、会議情報を一度に取得
+        stmt = (
+            select(
+                User,
+                mymodels.Participant.role_type,
+                mymodels.Meeting.title.label('meeting_title'),
+                mymodels.Meeting.meeting_id
+            )
+            .join(mymodels.Participant, mymodels.Participant.user_id == User.user_id)
+            .join(mymodels.Meeting, mymodels.Participant.meeting_id == mymodels.Meeting.meeting_id)
+            .where(mymodels.Participant.meeting_id.in_(meeting_ids))
+            .distinct(User.user_id)  # 重複ユーザーを除去
+        )
+        
+        return db.execute(stmt).fetchall()
+        
+    except Exception as e:
+        print(f"ユーザー履歴取得エラー: {e}")
+        return []
 
 def get_meetings_by_user_with_details(user_id: str, start_datetime: Optional[str] = None,
                         end_datetime: Optional[str] = None, organization_id: Optional[int] = None,
@@ -695,6 +780,3 @@ def test_db_connection():
 
 if __name__ == "__main__":
     test_db_connection()
-    
-
-    

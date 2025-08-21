@@ -146,12 +146,14 @@ class TagsRegisterBatch(BaseModel):
 class TagGenerateResponse(BaseModel):
     tags: List[str]
 
+# 🆕 RecommendUserクラスの修正（会議名フィールドを追加）
 class RecommendUser(BaseModel):
     organization_name: str
     name: str
     user_id: str
     similarity_score: Optional[float] = None
     past_role: Optional[str] = None
+    past_meeting_title: Optional[str] = None  # 🆕 過去に参加した会議名を追加
 
 class AttendCreate(BaseModel):
     meeting_id: int
@@ -1001,6 +1003,7 @@ async def generate_tags(topic: str = Query(..., description="抽出対象の文�
 
 from sqlalchemy import select, func
 
+# 🆕 /recommendエンドポイントの修正（効率化版・会議名対応）
 @app.get("/recommend", response_model=List[RecommendUser])
 async def get_recommendations(
     tag: str = Query(..., description="基準となるキーワード（スペース区切りで複数可）"),
@@ -1013,7 +1016,7 @@ async def get_recommendations(
     )
 ):
     """
-    おすすめ参加者API
+    おすすめ参加者API（会議名対応版）
     tag: キーワード（スペース区切りで複数指定可能）
     top_k: 上位何件の類似会議IDを参照するか
     """
@@ -1035,33 +1038,27 @@ async def get_recommendations(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"類似タグ検索に失敗: {e}")
 
-    # 3) 類似会議の参加者を取得
+    # 3) 🆕 効率的にユーザー情報と履歴を一度に取得
     try:
-        users = crud.get_users_by_meeting_ids(db, similar_meeting_ids)
+        # 新しいcrud関数を使用してユーザー情報と履歴を一度に取得
+        user_history_data = crud.get_users_by_meeting_ids_with_history(db, similar_meeting_ids)
         
         # 重複を除去し、ユーザー情報を整形
         seen_users = set()
         result: List[RecommendUser] = []
         
-        for user in users:
+        for user, role, meeting_title, meeting_id in user_history_data:
             if user.user_id not in seen_users:
                 seen_users.add(user.user_id)
                 org = crud.get_organization_by_id(user.organization_id)
-                
-                # 過去の役割を取得（オプション）
-                past_role = None
-                for meeting_id in similar_meeting_ids:
-                    participant = crud.get_participant_role(meeting_id, user.user_id)
-                    if participant:
-                        past_role = participant.role_type
-                        break
                 
                 result.append(
                     RecommendUser(
                         organization_name=org.organization_name if org else "",
                         name=user.name,
                         user_id=user.user_id,
-                        past_role=past_role
+                        past_role=role,  # 🆕 効率的に取得した役割
+                        past_meeting_title=meeting_title  # 🆕 効率的に取得した会議名
                     )
                 )
         
@@ -1361,14 +1358,15 @@ async def root():
     """ルートエンドポイント"""
     return {
         "message": "Meeting Management API", 
-        "version": "1.2-enhanced-with-rules",
+        "version": "1.3-enhanced-with-meeting-titles",
         "new_features": [
             "会議概要 (description)",
             "優先度 (priority)", 
             "終了時間 (end_time)",
             "ステータス (status)",
             "招集ルール違反チェック (rule_violation)",
-            "会議コスト計算対応"
+            "会議コスト計算対応",
+            "🆕 AI推薦での過去の会議名表示対応"
         ],
         "endpoints": [
             "/auth/login",
@@ -1378,6 +1376,7 @@ async def root():
             "/meeting/{meeting_id} (GET)",
             "/meeting/{meeting_id}/agenda (GET)",
             "/meeting/{meeting_id}/participants (GET)",
+            "/recommend (GET) - Enhanced with meeting titles",  # 🆕
             "/debug/db-test",
             "/debug/user-check",
             "/health"
